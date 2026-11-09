@@ -1,6 +1,6 @@
 {
   "name": "dsh-widgets",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Small, independent widgets for the DeepSeek Harness UI: a branch/worktree target picker that defaults to the current branch, opt-in branch folders in the workspace tree, a Shift+Tab /plan toggle, drag-and-drop and in-place editing of the message queue, and an Improve prompt button with its own model, thinking switch and thinking effort.",
   "icon": "./assets/icon.svg",
   "license": "MIT",
@@ -19,21 +19,25 @@
     "reasoning-effort"
   ],
   "exports": {
-    ".": "./index.js",
-    "./client": "./client.js",
+    ".": "./dist/index.js",
+    "./client": "./dist/web/client.js",
     "./package.json": "./package.json"
   },
   "files": [
-    "index.js",
-    "client.js",
+    "dist",
+    "cordis.patch.yml",
     "README.md",
     "LICENSE",
-    "assets/icon.svg",
-    "cordis.patch.yml"
+    "assets/icon.svg"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs",
-    "test:one": "node --test"
+    "build": "npm run build:host && npm run build:web",
+    "build:host": "tsc -p tsconfig.build.json",
+    "build:web": "node build.web.mjs",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.web.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "e2e": "npm run build && node e2e/widgets.spec.mjs",
+    "clean": "rm -rf dist"
   },
   "dsh": {
     "bundle": {
@@ -66,9 +70,19 @@
   },
   "engines": {
     "node": ">=22",
-    "dsh": ">=0.2.0-rc.2"
+    "dsh": ">=0.2.2-rc.1"
   },
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh": "^0.2.2-rc.1",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "playwright": "^1.56.0",
+    "typescript": "^7.0.2"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts"
 }

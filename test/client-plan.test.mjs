@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const source = readFileSync(new URL('../client.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../dist/web/client.js', import.meta.url), 'utf8');
 let module;
 const selection = { removeAllRanges() { this.range = null; }, addRange(range) { this.range = range; } };
 globalThis.window = { __ModuleLoader__: { load: (value) => { module = value; } }, getSelection: () => selection };

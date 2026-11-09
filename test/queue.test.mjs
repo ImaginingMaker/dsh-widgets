@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import {
   QUEUE_EDIT_PATH, QUEUE_MOVE_PATH, editContentOk, installQueueEdit, installQueueMove, isEditPart, mergeQueueOrder, seenOf,
-} from '../index.js';
+} from '../dist/index.js';
 import { call, makeCtx, tempDir } from './helpers.mjs';
 
 // ---- the ordering rule -------------------------------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const source = readFileSync(new URL('../client.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../dist/web/client.js', import.meta.url), 'utf8');
 let module;
 globalThis.window = { __ModuleLoader__: { load: (value) => { module = value; } } };
 eval(source);
@@ -326,6 +326,7 @@ const find = (id) => registrations.find((entry) => entry.options.id === id);
 {
   const entry = find('widgets');
   assert.ok(entry !== undefined, 'the settings section registers');
+
   assert.equal(entry.options.name, 'settings.section');
   const label = entry.options.label();
   assert.equal(label, 'Widgets', 'English first, from the one place that names the section');

@@ -5,12 +5,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  IMPROVE_INPUT_MAX, IMPROVE_PATH, IMPROVE_TIMEOUT_MS, IMPROVE_MAX_TOKENS, callControls, improveInputOk, improvePromptText,
+  IMPROVE_INPUT_MAX, IMPROVE_PATH, IMPROVE_MAX_TOKENS, callControls, improveInputOk, improvePromptText,
   installImprove, projectBrief, readInside,
-} from '../index.js';
+} from '../dist/index.js';
 import { call, makeCtx, makeLlm, tempDir } from './helpers.mjs';
 
-void IMPROVE_TIMEOUT_MS;
 
 // ---- the request bounds ------------------------------------------------------------------------------------------------
 assert.equal(improveInputOk('fix the login'), true);

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   MODES, OFF_BY_DEFAULT, SETTINGS_PATH, WIDGETS, defaultOn, defaultSettings, installSettings,
   isWidget, parseSettingsPatch, sanitizeSettings, settingsStore,
-} from '../index.js';
+} from '../dist/index.js';
 import { call, makeCtx, tempDir } from './helpers.mjs';
 
 // The switch table: six widgets, one off by default, and the default follows that list.
@@ -40,10 +40,10 @@ assert.equal(sanitizeSettings({ branchTarget: { mode: 'bogus' } }).branchTarget.
 for (const mode of MODES) assert.equal(sanitizeSettings({ branchTarget: { mode } }).branchTarget.mode, mode);
 
 // The patch parser: what the panel sends, and everything it may not send.
-assert.deepEqual(parseSettingsPatch({ id: 'planToggle', on: false }), { kind: 'switch', id: 'planToggle', on: false });
-assert.deepEqual(parseSettingsPatch({ improve: { effort: 'high' } }), { kind: 'improve', patch: { effort: 'high' } });
-assert.deepEqual(parseSettingsPatch({ improve: { model: null } }), { kind: 'improve', patch: { model: null } });
-assert.deepEqual(parseSettingsPatch({ branchTarget: { mode: 'worktree' } }), { kind: 'mode', mode: 'worktree' });
+assert.deepEqual(parseSettingsPatch({ id: 'planToggle', on: false }), { patch: { kind: 'switch', id: 'planToggle', on: false } });
+assert.deepEqual(parseSettingsPatch({ improve: { effort: 'high' } }), { patch: { kind: 'improve', patch: { effort: 'high' } } });
+assert.deepEqual(parseSettingsPatch({ improve: { model: null } }), { patch: { kind: 'improve', patch: { model: null } } });
+assert.deepEqual(parseSettingsPatch({ branchTarget: { mode: 'worktree' } }), { patch: { kind: 'mode', mode: 'worktree' } });
 for (const bad of [
   null, 'x', {}, { id: 'nope', on: true }, { id: 'planToggle', on: 'yes' }, { id: 'planToggle' },
   { improve: {} , extra: 1 }, { improve: { nope: 1 } }, { improve: { model: { provider: 'p' } } },

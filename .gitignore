@@ -1,4 +1,7 @@
 node_modules/
+dist/
+e2e/artifacts/
 *.tgz
 .DS_Store
 coverage/
+*.tsbuildinfo

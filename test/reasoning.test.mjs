@@ -1,7 +1,7 @@
 // Reasoning efforts come from this Mac's model configuration, never from a fixed ladder. The fixtures below are the
 // exact shape the local configuration declares (`off: null`, `low`, `medium`, `high`), as `resolveModelInfo` reports it.
 import assert from 'node:assert/strict';
-import { OFF_EFFORT, callControls, reasoningOptions } from '../index.js';
+import { OFF_EFFORT, callControls, reasoningOptions } from '../dist/index.js';
 
 /** What the local config `off: null / low: low / medium: medium / high: high` turns into. */
 const FOUR_LEVELS = {

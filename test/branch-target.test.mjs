@@ -6,10 +6,15 @@ import { join } from 'node:path';
 import {
   BRANCH_TARGET_PATH, applyTarget, branchSlug, currentBranch, installBranchTarget, isBranchName, isInsideProject,
   localBranches, parseTarget, projectDirOf, runGit, worktreeFolder, worktreeList,
-} from '../index.js';
+} from '../dist/index.js';
 import { call, gitSync, makeCtx, makePlainDir, makeRepo, realSubprocess } from './helpers.mjs';
 
 const subprocess = realSubprocess();
+/** `applyTarget` answers `{ok}` or `{error}`; the checks below read the result itself. */
+const doTarget = async (...args) => {
+  const result = await applyTarget(...args);
+  return 'ok' in result ? result.ok : result;
+};
 
 // ---- names -----------------------------------------------------------------------------------------------------------
 for (const good of ['main', 'feat/add-login', 'fix/a.b-c_d', 'a', `x/${'y'.repeat(60)}`.slice(0, 64)]) {
@@ -84,14 +89,14 @@ try {
 
   // current: no branch is created, no commit, nothing written.
   const head = (await runGit(subprocess, repo.dir, ['rev-parse', 'HEAD'])).stdout.trim();
-  const current = await applyTarget(subprocess, repo.dir, { mode: 'current' }, 'Add a login form');
+  const current = await doTarget(subprocess, repo.dir, { mode: 'current' }, 'Add a login form');
   assert.equal(current.mode, 'current');
   assert.equal(current.branch, 'main');
   assert.equal((await runGit(subprocess, repo.dir, ['rev-parse', 'HEAD'])).stdout.trim(), head, 'current changes no commit');
   assert.deepEqual(await localBranches(subprocess, repo.dir), ['main'], 'current creates no branch');
 
   // branch: a new branch in the project folder, named from the message.
-  const branch = await applyTarget(subprocess, repo.dir, { mode: 'branch' }, 'Add a login form');
+  const branch = await doTarget(subprocess, repo.dir, { mode: 'branch' }, 'Add a login form');
   assert.equal(branch.mode, 'branch');
   assert.equal(branch.branch, 'feat/add-a-login-form');
   assert.equal(branch.cwd, real(repo.dir));
@@ -100,14 +105,14 @@ try {
 
   // The same message again would collide, so the slug moves on; and an explicit name that exists is refused.
   await gitSync(repo.dir, ['switch', 'main']);
-  const second = await applyTarget(subprocess, repo.dir, { mode: 'branch' }, 'Add a login form');
+  const second = await doTarget(subprocess, repo.dir, { mode: 'branch' }, 'Add a login form');
   assert.equal(second.branch, 'feat/add-a-login-form-2');
   await gitSync(repo.dir, ['switch', 'main']);
-  const clash = await applyTarget(subprocess, repo.dir, { mode: 'branch', branchName: 'feat/add-a-login-form' }, 'x');
+  const clash = await doTarget(subprocess, repo.dir, { mode: 'branch', branchName: 'feat/add-a-login-form' }, 'x');
   assert.match(clash.error, /already exists/);
 
   // worktree: its own branch AND its own folder, from the current branch.
-  const worktree = await applyTarget(subprocess, repo.dir, { mode: 'worktree' }, 'Try the new parser');
+  const worktree = await doTarget(subprocess, repo.dir, { mode: 'worktree' }, 'Try the new parser');
   assert.equal(worktree.mode, 'worktree');
   assert.equal(worktree.branch, 'feat/try-the-new-parser');
   assert.equal(worktree.cwd, join(real(repo.dir), '.worktrees', 'feat-try-the-new-parser'));
@@ -118,35 +123,35 @@ try {
 
   // A worktree path that exists is refused, never overwritten.
   await gitSync(repo.dir, ['switch', 'main']);
-  const occupied = await applyTarget(subprocess, repo.dir, { mode: 'worktree', branchName: 'feat/try-the-new-parser' }, 'x');
+  const occupied = await doTarget(subprocess, repo.dir, { mode: 'worktree', branchName: 'feat/try-the-new-parser' }, 'x');
   assert.match(occupied.error, /already exists/);
 
   // existing-branch: check out what is there, create nothing.
-  const existing = await applyTarget(subprocess, repo.dir, { mode: 'existing-branch', existingBranch: 'feat/add-a-login-form' }, 'x');
+  const existing = await doTarget(subprocess, repo.dir, { mode: 'existing-branch', existingBranch: 'feat/add-a-login-form' }, 'x');
   assert.equal(existing.mode, 'existing-branch');
   assert.equal(existing.branch, 'feat/add-a-login-form');
   assert.equal(await currentBranch(subprocess, repo.dir), 'feat/add-a-login-form');
-  const missing = await applyTarget(subprocess, repo.dir, { mode: 'existing-branch', existingBranch: 'nope' }, 'x');
+  const missing = await doTarget(subprocess, repo.dir, { mode: 'existing-branch', existingBranch: 'nope' }, 'x');
   assert.equal(typeof missing.error, 'string');
   await gitSync(repo.dir, ['switch', 'main']);
 
   // existing-worktree: only a worktree this repository knows, inside the project.
-  const reused = await applyTarget(subprocess, repo.dir, { mode: 'existing-worktree', worktreePath: worktree.cwd }, 'x');
+  const reused = await doTarget(subprocess, repo.dir, { mode: 'existing-worktree', worktreePath: worktree.cwd }, 'x');
   assert.equal(reused.mode, 'existing-worktree');
   assert.equal(reused.branch, 'feat/try-the-new-parser');
-  const itself = await applyTarget(subprocess, repo.dir, { mode: 'existing-worktree', worktreePath: repo.dir }, 'x');
+  const itself = await doTarget(subprocess, repo.dir, { mode: 'existing-worktree', worktreePath: repo.dir }, 'x');
   assert.match(itself.error, /project itself/, 'the project folder is the current-branch target, not a worktree');
-  const nowhere = await applyTarget(subprocess, repo.dir, { mode: 'existing-worktree', worktreePath: '/tmp/definitely-not-here-12345' }, 'x');
+  const nowhere = await doTarget(subprocess, repo.dir, { mode: 'existing-worktree', worktreePath: '/tmp/definitely-not-here-12345' }, 'x');
   assert.match(nowhere.error, /does not exist/);
 } finally { repo.cleanup(); }
 
 // ---- a folder that is not a repository, and one with no commit --------------------------------------------------------
 const plain = makePlainDir();
 try {
-  const fallback = await applyTarget(subprocess, plain.dir, { mode: 'current' });
+  const fallback = await doTarget(subprocess, plain.dir, { mode: 'current' });
   assert.equal(fallback.mode, 'current');
   assert.equal(fallback.branch, null);
-  const refused = await applyTarget(subprocess, plain.dir, { mode: 'branch' }, 'x');
+  const refused = await doTarget(subprocess, plain.dir, { mode: 'branch' }, 'x');
   assert.match(refused.error, /not a git repository/);
 } finally { plain.cleanup(); }
 
@@ -157,9 +162,9 @@ try {
   await gitSync(empty.dir, ['rm', '-rf', '--cached', '.']);
   // An unborn HEAD resolves to no branch at all, which is what the picker reports as "not a repository with a commit".
   assert.equal(await currentBranch(subprocess, empty.dir), undefined);
-  const unbornWorktree = await applyTarget(subprocess, empty.dir, { mode: 'worktree' }, 'x');
+  const unbornWorktree = await doTarget(subprocess, empty.dir, { mode: 'worktree' }, 'x');
   assert.match(unbornWorktree.error, /no commit/);
-  const unbornBranch = await applyTarget(subprocess, empty.dir, { mode: 'branch' }, 'x');
+  const unbornBranch = await doTarget(subprocess, empty.dir, { mode: 'branch' }, 'x');
   assert.match(unbornBranch.error, /no commit/);
 } finally { empty.cleanup(); }
 

@@ -21,7 +21,7 @@ dsh plugin --profile web add dsh-widgets
 
 Then restart dsh.
 
-Requires Node ≥ 22 and dsh ≥ 0.2.0-rc.2. MIT licensed. No runtime dependencies.
+Requires dsh ≥ 0.2.2-rc.1. MIT licensed. **No runtime dependencies** — the published package contains only built files.
 
 ---
 
@@ -177,26 +177,94 @@ dsh ≥ 0.2.0-rc.2, Node ≥ 22. Tested against dsh's published Client and Host 
 
 ## Development
 
+The plugin is TypeScript. Two halves, two compilers, one command:
+
 ```sh
-npm test
+npm install
+npm run typecheck   # tsc over the Host half, then over the browser half (DOM lib, no node:)
+npm run build       # dist/index.js (tsc) + dist/web/client.js (esbuild)
+npm test            # builds, then runs the unit suite against dist/
+npm run e2e         # builds, then drives a real dsh in a real browser
 ```
 
-The suite is plain `node --test` with no dependencies:
+### Why two builds
+
+dsh loads a plugin's two halves in two different ways, and each one constrains the build:
+
+| Half | What dsh does with it | How it is built |
+|---|---|---|
+| Host | imports `package.json` `main` as an ES module | `tsc -p tsconfig.build.json` → `dist/` |
+| Client | evaluates **one script** that calls `window.__ModuleLoader__.load({ id, factory })` | esbuild → `dist/web/client.js`, wrapped in that call |
+
+The browser half cannot be a normal ES module: dsh hands the factory its own `require` for `react`, and a second copy of
+React would break hooks across the two trees. So `react` stays external and the bundle is CommonJS text inside the loader
+call. `build.web.mjs` checks the result — the registered id, the wrapper, and that no `node:` module leaked into it — so a
+broken bundle fails the build instead of failing silently at runtime.
+
+A cordis service this plugin does not declare in `inject` must never be read directly: cordis throws
+`cannot get property "X" without inject`. Every optional service (`llm`, `timer`, `workspaceRegistry`, `remote`, …) is read
+through a guard, so a profile that lacks one still loads every widget it can.
+
+### Layout
+
+```
+src/
+├── shared/     pure, no node:, no React — compiled into both halves
+│   ├── types.ts  settings.ts  reasoning.ts  branch.ts  queue.ts  routes.ts
+├── host/       node: allowed, no DOM
+│   ├── index.ts  store.ts  files.ts  git.ts  project.ts
+│   └── routes/   settings, models, branchTarget, branchTree, improve, queue
+└── web/        DOM only, no node:
+    ├── index.ts  slot.ts
+    ├── kernel/   i18n, settingsStore, modelStore, hostJson, queueApi, plan, safe
+    └── widgets/  planToggle, queue, improve, branchTarget, settings
+```
+
+`src/shared` is the contract between the halves: if it needs `node:fs` or `document`, it belongs in one of the others.
+
+### Tests
+
+The suite is plain `node --test` with no test framework:
 
 | File | Covers |
 |---|---|
-| `test/meta.test.mjs` | manifest, bundle patch, CI, README, both languages |
+| `test/meta.test.mjs` | manifest, bundle patch, CI, README, both languages, the build pipeline |
 | `test/settings.test.mjs` | defaults, narrowing, atomic owner-only writes, serialized writes, every patch shape |
 | `test/branch-target.test.mjs` | name rules, the five modes, **mutual exclusion**, and real git in a temporary repository |
 | `test/branch-tree.test.mjs` | inert while off, idempotent while on, non-destructive on removal |
-| `test/reasoning.test.mjs` | efforts read from model configuration, and what is actually sent |
+| `test/reasoning.test.mjs` | efforts read from the model configuration, and what is actually sent |
 | `test/improve.test.mjs` | the prompt, safe file reads, the route, superseding, failures |
 | `test/queue.test.mjs` | the ordering rule and both queue routes |
-| `test/client-plan.test.mjs` | the real `PlanToggle` against a fake DOM |
-| `test/client-widgets.test.mjs` | the real components: queue, picker, wand, settings |
+| `test/client-plan.test.mjs` | the built bundle's `PlanToggle` against a fake DOM |
+| `test/client-widgets.test.mjs` | the built bundle's components: queue, picker, wand, settings |
 
-Client tests run the shipped `client.js` in a fake `window.__ModuleLoader__` and React, so they exercise the same code
-the app loads.
+The client tests run **`dist/web/client.js`**, not the sources — so they also prove the loader wrapper and the externals
+are right. They stub `window.__ModuleLoader__`, React and the DOM; they do not prove anything about how dsh renders.
+
+### End-to-end (the real environment)
+
+That is what `npm run e2e` is for. It is not a mock:
+
+- installs the plugin into a **throwaway `DSH_HOME`** (your own profile is untouched),
+- spawns the real `dsh` CLI with `--profile web --port … --no-open`,
+- opens the app in **real Chrome** through Playwright, using the access token dsh prints,
+- serves a fake OpenAI-compatible model, so no provider is called,
+- and asserts on what actually happens:
+
+```
+✓ dsh started and rendered with dsh-widgets loaded
+✓ Settings → Widgets shows the six rows
+✓ a switch writes storages/dsh-widgets/settings.json
+✓ a model without reasoningEfforts offers no effort menu
+✓ the reasoning ladder is read from the model configuration, and the choice is saved
+✓ the target picker is in the composer with all five modes, defaulting to the current branch
+✓ a new worktree created a real branch and checkout, and left the project folder alone
+✓ Shift+Tab writes and removes the /plan prefix in the real composer
+```
+
+This is the check that found three real defects the unit tests could not: a host half that asked cordis for `timer`
+without declaring it, a client half that did the same for `remote` and `slots`, and a browser page opened without dsh's
+access token. CI runs it on Node 24 alongside the unit matrix.
 
 ## License
 
@@ -219,7 +287,7 @@ MIT. See [LICENSE](LICENSE).
 dsh plugin --profile web add dsh-widgets
 ```
 
-然后重启 dsh。需要 Node ≥ 22、dsh ≥ 0.2.0-rc.2，MIT 许可，无运行时依赖。
+然后重启 dsh。需要 dsh ≥ 0.2.2-rc.1，MIT 许可，**无运行时依赖** —— 发布包里只有构建产物。
 
 ### 六个组件
 
@@ -294,6 +362,45 @@ reasoningEfforts:
 - 队列条自成一列，不去改写 dsh 自身的 DOM：好处是 dsh 升级不会留下画了一半的手柄，代价是它是独立的一条，
   而不是嵌在 dsh 自己的行里。
 - 本版本不支持从队列条新增图片。
+
+### 开发与测试
+
+插件用 TypeScript 编写，两半两套构建，一条命令：
+
+```sh
+npm install
+npm run typecheck   # 先检查 Host 半，再用 DOM 库检查浏览器半（不含 node:）
+npm run build       # dist/index.js（tsc）+ dist/web/client.js（esbuild）
+npm test            # 先构建，再对 dist/ 跑单元测试
+npm run e2e         # 先构建，再在真实 dsh 与真实浏览器里跑端到端
+```
+
+**为什么要两套构建**：dsh 加载两半的方式不同——Host 半按 ES 模块 `import`，浏览器半则是**一个脚本**调用
+`window.__ModuleLoader__.load({ id, factory })`。浏览器半不能是普通 ES 模块：dsh 通过 `require` 把自己那份
+`react` 交给 factory，再打一份 React 会让两棵树的 hooks 互相打架，所以 `react` 保持 external，产物是包在 loader
+调用里的 CommonJS 文本。`build.web.mjs` 会校验产物（注册的 id、包裹结构、没有 `node:` 泄漏），坏包在构建期
+就失败，而不是运行时静默不加载。
+
+**cordis 的 inject 规则**：插件没有在 `inject` 里声明的服务，**不能直接读**——会抛
+`cannot get property "X" without inject`。本插件把每个可选服务（`llm`、`timer`、`workspaceRegistry`、`remote` …）
+都走受保护的读取，所以某个 profile 缺某个服务时，其余小组件照常加载。
+
+**单元测试**（`node --test`，无测试框架）对 **`dist/` 里的产物**运行——客户端测试跑的是
+`dist/web/client.js`，因此顺带验证了 loader 包裹与 externals 是否正确。但它们是假 `window.__ModuleLoader__`、
+假 React、假 DOM：**不证明 dsh 会怎么渲染**。
+
+**真机测试**（`npm run e2e`）才是证明：
+
+- 把插件装进**一次性 `DSH_HOME`**（不碰你自己的 profile）；
+- 用真实 `dsh` CLI 起 `--profile web --port … --no-open`；
+- 用 Playwright 打开**真实 Chrome**，走 dsh 打印的 access token；
+- 起一个假的 OpenAI 兼容模型，不调用任何真实供应商；
+- 断言真实发生的事情：设置面板六行、开关真的写进 `storages/dsh-widgets/settings.json`、没有 `reasoningEfforts`
+  的模型不显示档位菜单、有 `off/low/high` 的模型下拉恰好那三项、新建 worktree 真的在磁盘上建出目录与分支、
+  Shift+Tab 在真实 composer 里写入并移除 `/plan `。
+
+**它抓到过三个单元测试抓不到的真实缺陷**：Host 半未声明 `timer` 就读它、客户端半同样未声明 `remote` 与 `slots`、
+以及页面没有带 dsh 的 access token 打开。CI 在 Node 24 上把它和单元矩阵一起跑。
 
 ### 许可
 

@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true,
+    "sourceMap": false
+  },
+  "include": [
+    "src/index.ts",
+    "src/host/**/*.ts",
+    "src/shared/**/*.ts"
+  ],
+  "exclude": [
+    "src/web"
+  ]
+}

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BRANCH_TREE_PATH, installBranchTree } from '../index.js';
+import { BRANCH_TREE_PATH, installBranchTree } from '../dist/index.js';
 import { call, makeCtx, tempDir } from './helpers.mjs';
 
 /** A workspace registry that records what it was asked to create. */
