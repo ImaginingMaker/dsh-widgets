@@ -45,15 +45,20 @@ export function reasoningOptions(modelInfo: ModelInfoLike | undefined | null): R
 }
 
 /**
- * The request controls for one model call. An effort the model does not declare is replaced by the model's own default,
- * because dsh rejects an unsupported explicit effort before any provider call rather than clamping it. `off` and
- * "nothing chosen" both send no `reasoningEffort`, which is exactly what the configuration's `off: null` means.
+ * The request controls for one model call.
+ *
+ * `off` is a first-class level of the ladder, not the absence of one: the local configuration spells it `off:` with an
+ * empty value, and the adapter is what turns that value into "send the provider nothing". Dropping the field here instead
+ * would let `prepareCall` materialize the adapter's default effort, which is the opposite of what the user asked for.
+ *
+ * An effort the model does not declare falls back to the model's own default, because dsh rejects an unsupported explicit
+ * effort before any provider call rather than clamping it. Only a model that declares no ladder at all sends nothing.
  */
 export function callControls(effort: string | null | undefined, modelInfo: ModelInfoLike | undefined | null): CallControls {
   const { efforts, defaultEffort } = reasoningOptions(modelInfo);
   if (efforts.length === 0) return {};
   const ids = efforts.map((entry) => entry.id);
   const wanted = isText(effort, 64) && ids.includes(effort) ? effort : defaultEffort;
-  if (wanted === undefined || wanted === OFF_EFFORT || !ids.includes(wanted)) return {};
+  if (wanted === undefined || !ids.includes(wanted)) return {};
   return { reasoningEffort: wanted };
 }

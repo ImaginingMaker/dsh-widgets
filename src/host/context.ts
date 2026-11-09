@@ -38,7 +38,10 @@ export interface ResolvedModelInfo {
 }
 
 export interface PreparedCall {
+  /** The config dsh resolved at prepare time; it must travel back into `stream`, or the dispatch is refused. */
+  readonly config?: Record<string, unknown>;
   stream(options: {
+    readonly system?: string;
     readonly messages: readonly { readonly role: 'user'; readonly content: readonly { readonly type: 'text'; readonly text: string }[] }[];
     readonly maxTokens?: number;
     readonly signal?: AbortSignal;
@@ -49,7 +52,7 @@ export interface LlmService {
   listProviders(): readonly { readonly id: string; readonly name?: string }[];
   listModels?(provider: string): Promise<readonly { readonly id: string; readonly name?: string; readonly inputModalities?: readonly string[] }[]>;
   resolveModelInfo?(provider: string, model: string, signal?: AbortSignal): Promise<ResolvedModelInfo>;
-  prepareCall?(config: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }, signal?: AbortSignal): Promise<PreparedCall>;
+  prepareCall?(config: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string; readonly maxTokens?: number }, signal?: AbortSignal): Promise<PreparedCall>;
 }
 
 export interface InboxMessage {
@@ -84,7 +87,25 @@ export interface WorkspaceRegistry {
   create?(path: string, title?: string): Promise<WorkspaceEntry>;
 }
 
+/** The `agent/pre-step` waterfall: reject a step, or replace the messages that enter it. */
+export interface PreStepPayload {
+  readonly agent?: { readonly id?: unknown };
+  readonly messages?: readonly unknown[];
+  readonly turn?: number;
+  readonly step?: number;
+  readonly signal?: AbortSignal;
+}
+
+export type PreStepDecision =
+  | { readonly kind: 'reject' }
+  | { readonly kind: 'enter'; readonly messages: readonly unknown[]; readonly startsRequestSeries?: true };
+
 export interface HostContext {
+  on(
+    event: 'agent/pre-step',
+    listener: (payload: PreStepPayload, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>,
+    prepend?: boolean,
+  ): void;
   readonly connection: { readonly fetch: { register(route: RouteRegistration): (() => void) | undefined } };
   get(name: string): unknown;
   readonly subprocess: SubprocessService;

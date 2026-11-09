@@ -91,29 +91,35 @@ const TABLE = {
   assert.equal(high.json.effort, 'high');
   assert.equal(llm.calls.at(-1).reasoningEffort, 'high');
 
+  // `off` is a level: it must travel as the effort, or prepareCall would apply the adapter default and keep thinking on.
   const off = await call(routes, IMPROVE_PATH, { method: 'POST', body: { sessionId: 's3', text: 'x', provider: 'local', model: 'with-effort', effort: 'off' } });
   assert.equal(off.status, 200);
-  assert.equal(off.json.effort, null);
-  assert.equal('reasoningEffort' in llm.calls.at(-1), false, 'off sends nothing');
+  assert.equal(off.json.effort, 'off');
+  assert.equal(llm.calls.at(-1).reasoningEffort, 'off');
 
   // A saved effort is used when the request does not name one.
   const settingsFile = join(home.dir, 'storages', 'dsh-widgets', 'settings.json');
   mkdirSync(join(home.dir, 'storages', 'dsh-widgets'), { recursive: true });
-  writeFileSync(settingsFile, JSON.stringify({ improve: { effort: 'low' } }));
+  writeFileSync(settingsFile, JSON.stringify({ analysis: { effort: 'low' } }));
   const saved = await call(routes, IMPROVE_PATH, { method: 'POST', body: { sessionId: 's4', text: 'x', provider: 'local', model: 'with-effort' } });
   assert.equal(saved.json.effort, 'low');
 
   // Bad input is refused before any model call.
   const before = llm.calls.length;
   for (const body of [
-    {}, { sessionId: 's', text: 'x' }, { sessionId: 's', text: '', provider: 'local', model: 'no-effort' },
+    {}, { sessionId: 's' }, { sessionId: 's', text: '', provider: 'local', model: 'no-effort' },
     { sessionId: 's', text: 'x'.repeat(IMPROVE_INPUT_MAX + 1), provider: 'local', model: 'no-effort' },
-    { sessionId: 's', text: 'x', provider: '', model: 'no-effort' },
     'nope',
   ]) {
     assert.equal((await call(routes, IMPROVE_PATH, { method: 'POST', body })).status, 400, JSON.stringify(body).slice(0, 60));
   }
   assert.equal(llm.calls.length, before, 'no model call for a refused request');
+
+  // Without a per-chat route the plugin's single shared model decides. None is configured in this profile, so the answer
+  // is a refusal with a reason rather than a guess.
+  const shared = await call(routes, IMPROVE_PATH, { method: 'POST', body: { sessionId: 's', text: 'x' } });
+  assert.equal(shared.status, 409);
+  assert.match(shared.json.error, /no model is configured/);
 
   // An unknown route is a failure from the model service, reported, not a crash.
   const unknown = await call(routes, IMPROVE_PATH, { method: 'POST', body: { sessionId: 's', text: 'x', provider: 'local', model: 'nope' } });
@@ -204,7 +210,7 @@ const TABLE = {
   installImprove({ ...ctx }, home.dir);
   await call(routes, IMPROVE_PATH, { method: 'POST', body: { sessionId: 's', text: 'the exact draft', provider: 'local', model: 'no-effort' } });
   assert.match(seen[0], /the exact draft/);
-  assert.equal(llm.calls.at(-1).maxTokens === undefined, true, 'the cap travels in the stream options');
+  assert.equal(llm.calls.at(-1).maxTokens, IMPROVE_MAX_TOKENS, 'the cap is part of the prepared config, which dsh checks on dispatch');
   home.cleanup();
 }
 

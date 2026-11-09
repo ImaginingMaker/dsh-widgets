@@ -4,11 +4,25 @@ import type { SettingsView } from '../kernel/settingsStore.js';
 import { postJson } from '../kernel/hostJson.js';
 import type { ComposerProps, InputActions } from '../slot.js';
 
-const WandIcon = (): React.ReactElement => React.createElement('svg', { viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': true },
-  React.createElement('path', {
-    d: 'M9.5 2.5 11 1l1.5 1.5L11 4 9.5 2.5ZM3 13l6.5-6.5 1 1L4 14l-1-1Zm7.5-6.5L12 5l1 1-1.5 1.5-1-1Z',
-    fill: 'currentColor',
-  }));
+/**
+ * A sparkle wand, drawn to sit beside dsh's own composer icons: no border, no fill, one stroke weight, currentColor.
+ * Three separate marks read as "polish this" rather than as a tool with a handle.
+ */
+const SparkleIcon = (): React.ReactElement => React.createElement('svg', {
+  viewBox: '0 0 16 16', width: 15, height: 15, fill: 'none', 'aria-hidden': true,
+},
+React.createElement('path', {
+  d: 'M9.6 2.1 10.7 4.9 13.5 6 10.7 7.1 9.6 9.9 8.5 7.1 5.7 6 8.5 4.9 9.6 2.1Z',
+  stroke: 'currentColor', strokeWidth: 1.15, strokeLinejoin: 'round',
+}),
+React.createElement('path', {
+  d: 'M3.9 9.2 4.5 10.6 5.9 11.2 4.5 11.8 3.9 13.2 3.3 11.8 1.9 11.2 3.3 10.6 3.9 9.2Z',
+  stroke: 'currentColor', strokeWidth: 1.05, strokeLinejoin: 'round',
+}),
+React.createElement('path', {
+  d: 'M5.3 1.9v2.2M4.2 3h2.2M12.4 11.2v1.6M11.6 12h1.6',
+  stroke: 'currentColor', strokeWidth: 1.05, strokeLinecap: 'round',
+}));
 
 export interface ImproveButtonProps extends ComposerProps {
   readonly inputActions?: InputActions;
@@ -19,8 +33,8 @@ export interface ImproveButtonProps extends ComposerProps {
 }
 
 /**
- * The magic wand: one model call rewrites the draft, which is replaced but never sent. The model and the reasoning effort
- * come from the user's settings, read when the wand is pressed so a choice made since the chat opened still applies.
+ * One model call rewrites the draft, which is replaced but never sent. The model comes from the plugin's single analysis
+ * setting — read when the wand is pressed, so a choice made since the chat opened still applies.
  */
 export function ImproveButton({ sessionId, useInput, inputActions, store, chatProvider, chatModel, notify, t }: ImproveButtonProps): React.ReactElement {
   const draft = useInput((state) => (state === undefined ? '' : state.draft));
@@ -39,14 +53,14 @@ export function ImproveButton({ sessionId, useInput, inputActions, store, chatPr
     setError(undefined);
     try {
       const settings = store?.getSnapshot();
-      const chosen = settings?.improve?.model ?? null;
+      const chosen = settings?.analysis?.model ?? null;
       const body: Record<string, unknown> = {
         sessionId,
         text: current.draft,
         provider: chosen?.provider ?? current.chatProvider,
         model: chosen?.model ?? current.chatModel,
       };
-      const effort = settings?.improve?.effort;
+      const effort = settings?.analysis?.effort;
       if (effort !== null && effort !== undefined) body.effort = effort;
       const value = await postJson<{ text: string }>(IMPROVE_PATH, body);
       setUndone(current.draft);
@@ -70,7 +84,7 @@ export function ImproveButton({ sessionId, useInput, inputActions, store, chatPr
       'data-dsh-widgets-wand': '',
       disabled: busy || chatProvider === undefined || chatModel === undefined,
       onClick: run,
-    }, React.createElement(WandIcon)),
+    }, React.createElement(SparkleIcon)),
     undone === undefined ? null : React.createElement('button', {
       type: 'button',
       className: 'dw-btn',
@@ -79,5 +93,5 @@ export function ImproveButton({ sessionId, useInput, inputActions, store, chatPr
       'data-dsh-widgets-undo': '',
       onClick: () => { inputActions?.setDraft(undone); setUndone(undefined); },
     }, '↺'),
-    error === undefined ? null : React.createElement('span', { role: 'alert', style: { fontSize: 11, color: 'var(--dsw-alias-state-warn-label,#b25000)' } }, error));
+    error === undefined ? null : React.createElement('span', { role: 'alert', className: 'dw-error' }, error));
 }

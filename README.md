@@ -35,15 +35,20 @@ Requires dsh ≥ 0.2.2-rc.1. MIT licensed. **No runtime dependencies** — the p
 | [Queue drag-and-drop](#queue-drag-and-drop) | Reorder queued messages by drag, or by the arrow keys. | on |
 | [Edit queued message in place](#edit-queued-message-in-place) | Change a queued message's text before it is sent. | on |
 | [Improve prompt](#improve-prompt) | One model call rewrites your draft, with a model and a reasoning effort you choose. | on |
+| [Project brief](#project-brief) | A quiet summary of the project, gathered before the first task and handed to it. | **off** |
 
 Each widget's internal id — the key in `storages/dsh-widgets/settings.json`, and what to quote in an issue — is
-`branchTarget`, `branchTree`, `planToggle`, `queueReorder`, `queueEdit` and `improvePrompt`.
+`branchTarget`, `branchTree`, `planToggle`, `queueReorder`, `queueEdit`, `improvePrompt` and `projectBrief`.
 
 ---
 
 ### Branch per chat
 
-The composer shows **Start on: `<branch>`**. Nothing is created until you pick something and press **Start there**.
+On the New Session row, beside the workspace and mode controls, a chip shows the branch the next task will run on.
+Picking a target only records it — the work is described to the agent, not scripted around it.
+
+Once the chat has sent a message the chip becomes a read-only marker: the choice is made at the start and is not offered
+again, so a mid-conversation click cannot silently move work to another branch.
 
 Five targets, and exactly one of them is in force at a time:
 
@@ -63,9 +68,16 @@ git is touched. This is enforced in `parseTarget` and covered by the tests.
 proposes the same name: `feat/…`, or `fix/…` when the message reads like a bug report. A name already taken gets `-2`,
 `-3`. A message without ASCII letters (for example Chinese) becomes `feat/change`. You can type a name instead.
 
-**Refused, with git's own words:** a folder that is not a repository, a repository with no commit yet, a branch that
-already exists, a worktree folder that already exists, and a dirty tree that git will not switch away from. Nothing is
-overwritten and nothing is stashed behind your back.
+**How it is carried out.** The plugin does not run `git switch` or `git worktree add` for a branch: it tells the agent
+where the task belongs, and the agent uses its own tools. A dirty tree, an existing branch or a refused checkout is
+therefore handled in the conversation, with your approvals, instead of by a script that cannot see it.
+
+The single exception is a new worktree, because the chat's working directory is a property of the session and no prompt can
+change it: the folder is created at the first step and the chat is moved into it, so its file tools really work there. If
+that move is not available, the note tells the agent to use absolute paths inside the worktree instead.
+
+**Refused, with a reason:** a folder that is not a repository, a repository with no commit yet, a branch that already
+exists, and a worktree folder that already exists. Nothing is overwritten.
 
 ### Branches in the workspace tree
 
@@ -78,15 +90,18 @@ left alone. A folder that disappears stops being reported; its project is **not*
 
 ### Shift+Tab plan mode
 
-`Shift+Tab` in the composer adds `/plan ` at the very start of the draft. Press it again to remove it.
+`Shift+Tab` turns plan mode on, and off again when it is already on — by running dsh's own command, so the composer's
+plan chip lights up immediately and nothing is written into your draft.
 
-The prefix is the format dsh itself recognises: `/plan` followed by a space, a tab or the end of the draft. `/planning`
-is *not* the command and is left alone. Only the prefix is edited, so the rest of the draft, its file chips and its
-attachments stay intact, and the caret moves to the end.
+That is what dsh's `plan` command is: `Enter or leave plan mode`. `/plan` with no argument enters it, `/plan off` leaves
+it, `/plan <text>` enters it and sends that text.
 
-If the chat is already in plan mode, `Shift+Tab` leaves it through dsh's own `/plan off` command instead of editing the
-draft. Alt, Ctrl and Meta are not intercepted, a repeated key and an IME composition are ignored, and an open `/` menu
-keeps `Shift+Tab` for itself.
+The one exception is a chat that has not started yet: there is no agent to command, so `Shift+Tab` writes `/plan ` at the
+head of the draft instead, and the message you send is the one that starts the plan-mode turn. `/planning` is not the
+command and is left alone.
+
+Alt, Ctrl and Meta are not intercepted, a repeated key and an IME composition are ignored, and an open `/` menu keeps
+`Shift+Tab` for itself.
 
 ### Queue drag-and-drop
 
@@ -112,8 +127,9 @@ are several parts, and the check that should pass. It reads the draft and a shor
 (its `AGENTS.md`, `README.md` and `package.json`). The rewrite **replaces the draft and is never sent** — read it, edit
 it, then press Enter. **↺** puts the original back in one step.
 
-**The model is yours to choose.** Settings → Widgets → Improve prompt offers **Same as the chat**, or any model this Mac
-has configured.
+**The model is yours to choose, once.** Settings → Widgets has a single **Model** setting — **Same as the chat**, or any
+model this Mac has configured — and both Improve prompt and Project brief use it. There is one answer to "which model does
+this plugin call".
 
 **The reasoning ladder comes from your own model configuration — not from a fixed list.** dsh's model configuration
 declares, per model:
@@ -129,7 +145,8 @@ reasoningEfforts:
 The menu shows exactly those entries, in that order, for the model you picked. A model with no `reasoningEfforts` shows
 **"This model declares no reasoning effort"** and no menu, and no `reasoningEffort` is sent.
 
-- `off` means **send nothing**: the request carries no `reasoningEffort`, which is how dsh spells "off".
+- `off` is a level like any other: it is sent as the effort, and the adapter turns its empty API value into a request with
+  no reasoning field. Dropping the level instead would let dsh apply the adapter's default and keep thinking.
 - A model with no `off` entry cannot have its reasoning turned off; the menu offers only what it declares.
 - An effort that is not in the model's own list falls back to the model's declared default rather than being clamped or
   guessed, because dsh rejects an unsupported explicit effort before any provider call.
@@ -137,14 +154,36 @@ The menu shows exactly those entries, in that order, for the model you picked. A
 One improvement per chat at a time: a newer click replaces the older call, which answers `409` instead of holding the
 composer.
 
+### Project brief
+
+**Off by default.** Switch it on and the first task in a project opens with a short summary of that project.
+
+One quiet model call reads the same three files the plugin already trusts — `AGENTS.md`, `README.md`, `package.json` —
+and writes at most **500 characters**: what the project is and its stack, how to run it and its tests, what those files
+require of someone making changes, and the traps to avoid. The summary becomes the first thing the task is told.
+
+- **It never waits.** A read in flight is not waited for: if you send before it finishes, the task simply goes without the
+  summary. A read that fails is skipped the same way.
+- **One read per project**, keyed by its real path and a fingerprint of `HEAD` plus the files' size and mtime. A summary
+  made from an older state of the project is rebuilt on the next task; an unchanged one is reused, so the model is not
+  called again.
+- **The composer shows it**: a spinner while reading, a dot when ready (its tooltip is the summary), and a warning with a
+  reason and a retry when it failed. Switching the widget off removes the icon and stops every read.
+- It costs one model call per project change, not per chat.
+
 ---
 
 ## Settings
 
-**Settings → Widgets** has one row per widget with a switch. Rows also carry their own controls:
+**Settings → Widgets** has one row per widget with a switch. Above the rows sit two choices that apply to the whole plugin:
 
-- **Branch per chat** — the default target for a new task.
-- **Improve prompt** — the model and the reasoning effort.
+- **Language** — **Same as dsh**, English or 中文. Pinning one decides what the plugin speaks regardless of the app's own
+  language, which is how a Chinese panel can sit in an English app (and how the tests check it).
+- **Model** — **Same as the chat**, or any model this Mac has configured, plus its reasoning effort. There is exactly one
+  model setting: Improve prompt and Project brief both use it, so the plugin cannot call two different models by accident.
+
+Rows also carry their own controls: **Branch per chat** has the default target for a new task; the model and effort live
+under **Improve prompt**, next to the widget that shares them.
 
 Search filters the rows by name and description, ignoring case and accents.
 

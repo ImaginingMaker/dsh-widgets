@@ -1,5 +1,5 @@
 import { SETTINGS_PATH } from '../../shared/routes.js';
-import { defaultOn } from '../../shared/settings.js';
+import { defaultOn, defaultSettings } from '../../shared/settings.js';
 import type { Settings, WidgetId } from '../../shared/types.js';
 import { hostJson, postJson } from './hostJson.js';
 import type { Sender } from './hostJson.js';
@@ -11,12 +11,7 @@ export interface SettingsView extends Settings {
   readonly error?: string;
 }
 
-const EMPTY: SettingsView = {
-  ready: false,
-  on: { branchTarget: defaultOn('branchTarget'), branchTree: false, planToggle: true, queueReorder: true, queueEdit: true, improvePrompt: true },
-  branchTarget: { mode: 'current' },
-  improve: { model: null, effort: null },
-};
+const EMPTY: SettingsView = { ...defaultSettings(), ready: false };
 
 /** Whether a widget is on. Off-by-default widgets stay off until the stored value says otherwise. */
 export const isOn = (settings: Settings | SettingsView | undefined, id: WidgetId): boolean =>
@@ -42,7 +37,8 @@ export function createSettings(): Sender<SettingsView> & { save(body: unknown): 
       ...value,
       on: { ...EMPTY.on, ...(value.on ?? {}) },
       branchTarget: value.branchTarget ?? EMPTY.branchTarget,
-      improve: value.improve ?? EMPTY.improve,
+      analysis: value.analysis ?? EMPTY.analysis,
+      language: value.language ?? EMPTY.language,
       ready: true,
       error: undefined,
     };

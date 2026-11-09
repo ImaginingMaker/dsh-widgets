@@ -1,8 +1,6 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { realpathSync } from 'node:fs';
 import { branchSlug, worktreeFolder } from '../shared/branch.js';
-import type { Target, TargetMode } from '../shared/types.js';
 import { WORKTREES_DIR } from '../shared/routes.js';
 import type { SubprocessService } from './context.js';
 import { isInsideProject } from './files.js';
@@ -83,74 +81,43 @@ export async function worktreeList(subprocess: SubprocessService, cwd: string, s
   return entries.filter((item) => typeof item.path === 'string' && item.path !== '');
 }
 
-export interface AppliedTarget {
-  readonly cwd: string;
-  readonly branch: string | null;
-  readonly mode: TargetMode;
-  readonly worktree?: string;
+export interface CreatedWorktree {
+  readonly path: string;
+  readonly branch: string;
 }
 
-export type ApplyResult = { ok: AppliedTarget } | { error: string };
-
 /**
- * Carries out one target. `current` runs no git at all — the default must never touch the repository. The other modes
- * refuse to create anything that already exists, and a new worktree always creates its own branch first, so a chat is
- * never "on a branch and in a worktree" at the same time.
+ * Create a branch and a worktree for it, then answer where it is.
+ *
+ * This is the one piece of git this plugin still runs itself, and only because the chat's working directory is a property
+ * of the session rather than something a prompt can change: for the chat to really be "in the worktree", the folder has
+ * to exist before the first step runs. Which branch to cut and what to do inside it is still the agent's business.
  */
-export async function applyTarget(
+export async function createWorktree(
   subprocess: SubprocessService,
-  dir: string,
-  target: Target,
-  text: string | undefined,
+  projectDir: string,
+  options: { readonly branchName?: string; readonly text?: string },
   signal?: AbortSignal,
-): Promise<ApplyResult> {
-  const real = realpathSync(dir);
-
-  if (target.mode === 'current') {
-    return { ok: { cwd: real, branch: (await currentBranch(subprocess, real, signal)) ?? null, mode: 'current' } };
-  }
+): Promise<{ ok: CreatedWorktree; base: string } | { error: string }> {
+  let real: string;
+  try { real = realpathSync(projectDir); } catch { return { error: 'this project folder is gone' }; }
 
   const top = await runGit(subprocess, real, ['rev-parse', '--show-toplevel'], signal);
-  if (top.code !== 0) return { error: 'this folder is not a git repository, or it has no commit yet' };
+  if (top.code !== 0) return { error: 'this folder is not a git repository' };
   const head = await runGit(subprocess, real, ['rev-parse', '--verify', 'HEAD'], signal);
   if (head.code !== 0) return { error: 'this repository has no commit yet' };
 
   const existing = await localBranches(subprocess, real, signal);
+  const base = (await currentBranch(subprocess, real, signal)) ?? 'HEAD';
+  const branch = options.branchName ?? branchSlug(options.text, existing);
+  if (existing.includes(branch)) return { error: `the branch ${branch} already exists` };
 
-  if (target.mode === 'branch') {
-    const branch = target.branchName ?? branchSlug(text, existing);
-    if (existing.includes(branch)) return { error: `the branch ${branch} already exists` };
-    const created = await runGit(subprocess, real, ['switch', '-c', branch], signal);
-    if (created.code !== 0) return { error: created.stderr.trim() || 'git could not create the branch' };
-    return { ok: { cwd: real, branch, mode: 'branch' } };
-  }
+  const path = join(real, WORKTREES_DIR, worktreeFolder(branch));
+  if (existsSync(path)) return { error: `the folder ${path} already exists` };
+  if (!isInsideProject(real, join(real, WORKTREES_DIR))) return { error: 'the worktree would be outside the project' };
 
-  if (target.mode === 'worktree') {
-    const branch = target.branchName ?? branchSlug(text, existing);
-    if (existing.includes(branch)) return { error: `the branch ${branch} already exists` };
-    const path = join(real, WORKTREES_DIR, worktreeFolder(branch));
-    if (existsSync(path)) return { error: `the folder ${path} already exists` };
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    const added = await runGit(subprocess, real, ['worktree', 'add', '-b', branch, path, 'HEAD'], signal);
-    if (added.code !== 0) return { error: added.stderr.trim() || 'git could not create the worktree' };
-    return { ok: { cwd: path, branch, mode: 'worktree', worktree: path } };
-  }
-
-  if (target.mode === 'existing-branch') {
-    const switched = await runGit(subprocess, real, ['switch', target.existingBranch], signal);
-    if (switched.code !== 0) return { error: switched.stderr.trim() || 'git could not switch to that branch' };
-    return { ok: { cwd: real, branch: target.existingBranch, mode: 'existing-branch' } };
-  }
-
-  // existing-worktree: the folder must be a worktree git already knows, and not the project's own folder.
-  let realWorktree: string;
-  try { realWorktree = realpathSync(target.worktreePath); } catch { return { error: 'that worktree folder does not exist' }; }
-  const known = await worktreeList(subprocess, real, signal);
-  const entry = known.find((item) => {
-    try { return realpathSync(item.path) === realWorktree; } catch { return false; }
-  });
-  if (entry === undefined) return { error: 'that folder is not a worktree of this repository' };
-  if (entry.main === true) return { error: 'that folder is the project itself: use the current branch' };
-  if (!isInsideProject(real, realWorktree)) return { error: 'that worktree is outside this project' };
-  return { ok: { cwd: realWorktree, branch: entry.branch ?? null, mode: 'existing-worktree', worktree: realWorktree } };
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const added = await runGit(subprocess, real, ['worktree', 'add', '-b', branch, path, 'HEAD'], signal);
+  if (added.code !== 0) return { error: added.stderr.trim() || 'git could not create the worktree' };
+  return { ok: { path, branch }, base };
 }

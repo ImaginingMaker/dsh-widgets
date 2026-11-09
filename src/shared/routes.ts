@@ -6,6 +6,9 @@ export const BRANCH_TARGET_PATH = '/api/widgets.branch-target';
 export const BRANCH_TREE_PATH = '/api/widgets.branch-tree';
 export const QUEUE_MOVE_PATH = '/api/widgets.queue-move';
 export const QUEUE_EDIT_PATH = '/api/widgets.queue-edit';
+export const TARGET_INTENT_PATH = '/api/widgets.target-intent';
+export const BRIEF_PATH = '/api/widgets.project-brief';
+export const PLAN_PATH = '/api/widgets.plan';
 
 /** How often the branch-folder sweep runs while Branches in the workspace tree is on. */
 export const BRANCH_TREE_SWEEP_MS = 30_000;

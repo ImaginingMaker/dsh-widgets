@@ -1,30 +1,35 @@
 /**
  * dsh-widgets — Client half.
  *
- * Six small widgets, each with its own switch in Settings → Widgets. Switching one off disposes exactly what that panel
- * registered, and the settings section is the only place that writes a switch.
+ * Seven small widgets, each with its own switch in Settings → Widgets. Switching one off disposes exactly what it
+ * registered.
  *
- * Nothing here edits dsh's own markup: every control rides a published slot, so a dsh update cannot leave a half-drawn
- * control behind.
+ * Two rules this file exists to keep:
+ *
+ * 1. Every optional service is read through `read()`. cordis throws `cannot get property "X" without inject` for a
+ *    service a plugin did not declare, and one missing service must not stop the rest of the panel from loading.
+ * 2. Nothing edits dsh's own markup. Every control rides a published slot, so a dsh update cannot leave half a control
+ *    behind.
  */
 import React from 'react';
-import { MODELS_PATH, SETTINGS_PATH } from '../shared/routes.js';
-import type { TargetResult } from '../shared/types.js';
-import { hostJson } from './kernel/hostJson.js';
-import { translatorFor } from './kernel/i18n.js';
+import type { BriefView, LanguageSetting, TargetMode } from '../shared/types.js';
+import { translatorFor, resolveLanguage } from './kernel/i18n.js';
+import type { Language } from './kernel/i18n.js';
+import type { Translate } from './kernel/i18n.js';
 import { createModels } from './kernel/modelStore.js';
 import { read } from './kernel/safe.js';
 import { createSettings, isOn, queueOn } from './kernel/settingsStore.js';
 import type { SettingsView } from './kernel/settingsStore.js';
-import { BranchTargetButton } from './widgets/branchTarget.js';
+import { ensureStyles } from '../shared/styles.js';
+import { PLAN_PATH } from '../shared/routes.js';
+import { postJson } from './kernel/hostJson.js';
+import { BriefStatus } from './widgets/briefStatus.js';
 import { ImproveButton } from './widgets/improve.js';
 import { PlanToggle } from './widgets/planToggle.js';
 import { QueuePanel } from './widgets/queue.js';
 import type { QueuedRow } from './widgets/queue.js';
 import { WidgetSettings } from './widgets/settings.js';
-
-void MODELS_PATH;
-void SETTINGS_PATH;
+import { TargetChip } from './widgets/targetChip.js';
 
 /** The slice of a dsh Client Context this plugin uses. */
 interface ClientContext {
@@ -35,7 +40,7 @@ interface ClientContext {
   readonly locale?: { getSnapshot(): { active?: string } };
   readonly sessions?: {
     list: { getSnapshot(): { byId?: Record<string, { cwd?: string }> } };
-    scope(id: string): { get(name: string): { input: { for(ctx: unknown): { notify(level: string, text: string): void } } } } | undefined;
+    scope(id: string): { get(name: string): { input: { for(ctx: unknown): { notify(level: string, text: string): void } }; selection?: { getSnapshot(): { current?: { provider?: string; model?: string } } } } } | undefined;
   };
   readonly remote?: { commands?: { execute(sessionId: string, line: string, args: readonly unknown[]): Promise<{ ok: boolean; value?: unknown; error?: { message: string; code: string } }> } };
   get?(name: string): unknown;
@@ -49,15 +54,21 @@ interface Panel {
   off: (() => void) | null;
 }
 
+export const name = 'dsh-widgets';
+
+/**
+ * cordis activates a plugin only once the services it declares are present. `slots` is what this half cannot work without;
+ * `locale` is declared too, because the plugin speaks the app's language. Everything else is read defensively — and plan
+ * mode is toggled through this plugin's own Host route, because a client half cannot reach dsh's command registry.
+ */
+export const inject = ['slots', 'locale'];
+
 /** The chat's own model, for a chat that has not picked one in Settings. */
 function chatModelOf(ctx: ClientContext, sessionId: string): { provider?: string; model?: string } {
-  try {
-    const scope = read(() => ctx.sessions?.scope(sessionId)) as { get(name: string): Record<string, unknown> } | undefined;
-    const conversation = scope?.get('conversation') as { selection?: { getSnapshot(): { current?: { provider?: string; model?: string } } } } | undefined;
-    return conversation?.selection?.getSnapshot().current ?? {};
-  } catch {
-    return {};
-  }
+  return read(() => {
+    const scope = ctx.sessions?.scope(sessionId) as { get(name: string): { selection?: { getSnapshot(): { current?: { provider?: string; model?: string } } } } } | undefined;
+    return scope?.get('conversation')?.selection?.getSnapshot().current;
+  }) ?? {};
 }
 
 const notifyFor = (ctx: ClientContext, sessionId: string) => (level: 'info' | 'warn' | 'error', text: string): void => {
@@ -66,14 +77,6 @@ const notifyFor = (ctx: ClientContext, sessionId: string) => (level: 'info' | 'w
     scope?.get('conversation').input.for(scope).notify(level, text);
   } catch { /* a notice is best effort */ }
 };
-
-export const name = 'dsh-widgets';
-
-/**
- * cordis activates a plugin only once the services it declares are present. `slots` is the one this half cannot work
- * without; locale, sessions and remote are read defensively, so a build or profile without them still loads the panel.
- */
-export const inject = ['slots'];
 
 export function apply(ctx: ClientContext): void {
   try {
@@ -88,26 +91,27 @@ export function apply(ctx: ClientContext): void {
 function applyInner(ctx: ClientContext): void {
   const settings = createSettings();
   const models = createModels();
-  const language = (): string | undefined => read(() => ctx.locale?.getSnapshot().active);
-  const t = () => translatorFor(language());
+  const language = (): Language => resolveLanguage(settings.getSnapshot().language, read(() => ctx.locale?.getSnapshot().active));
+  const t = (): Translate => translatorFor(language());
+  const targetLanguage = (): LanguageSetting => (language() === 'zh' ? 'zh' : 'en');
 
-  const commands = read(() => ctx.remote?.commands);
-
-  const projectPathOf = (sessionId: string): string | undefined => {
-    return read(() => ctx.sessions?.list.getSnapshot().byId?.[sessionId]?.cwd);
-  };
-
-  /** Open a chat in the folder a target produced. */
-  const startIn = async (value: TargetResult): Promise<void> => {
+  /**
+   * Toggle plan mode for one chat through the Host, which is the only half that can reach dsh's command registry.
+   *
+   * A client plugin cannot run a slash command in this dsh version (the remotes face has no `commands`), and the Host
+   * route is restricted to the two plan lines rather than being a general command runner.
+   */
+  const togglePlan = (sessionId: string) => async (on: boolean): Promise<string | null> => {
     try {
-      const workspaces = read(() => ctx.get?.('workspaces')) as { list?: () => readonly { id?: string; workspaceId?: string; path: string }[]; create?: (input: { path: string }) => Promise<{ id?: string; workspaceId?: string }> } | undefined;
-      const uiWorkspace = read(() => ctx.get?.('uiWorkspace')) as { startSession?: (id: string) => void } | undefined;
-      const known = (workspaces?.list?.() ?? []).find((workspace) => workspace.path === value.cwd);
-      const created = known === undefined && workspaces?.create !== undefined ? await workspaces.create({ path: value.cwd }) : undefined;
-      const id = known?.workspaceId ?? known?.id ?? created?.workspaceId ?? created?.id;
-      if (id !== undefined) uiWorkspace?.startSession?.(id);
-    } catch { /* the folder is in the picker on the next try */ }
+      await postJson(PLAN_PATH, { sessionId, line: on ? '/plan off' : '/plan' });
+      return null;
+    } catch (error) {
+      return String((error as Error)?.message ?? error);
+    }
   };
+
+  const projectPathOf = (sessionId: string): string | undefined =>
+    read(() => ctx.sessions?.list.getSnapshot().byId?.[sessionId]?.cwd);
 
   const panels: Panel[] = [
     {
@@ -117,14 +121,7 @@ function applyInner(ctx: ClientContext): void {
         name: 'conversation.input.right',
         id: 'widgets-plan-toggle',
         order: 999,
-        inject: (sessionId: string) => ({
-          exitPlanMode: commands === undefined ? undefined : async () => {
-            const result = await commands.execute(sessionId, '/plan off', []);
-            if (!result.ok) return `${result.error?.message} (${result.error?.code})`;
-            return result.value === undefined ? 'unknown command: /plan off' : null;
-          },
-          notify: notifyFor(ctx, sessionId),
-        }),
+        inject: (sessionId: string) => ({ togglePlan: togglePlan(sessionId), notify: notifyFor(ctx, sessionId) }),
       }, PlanToggle))],
       off: null,
     },
@@ -136,7 +133,7 @@ function applyInner(ctx: ClientContext): void {
         id: 'widgets-queue',
         order: 21,
         inject: (sessionId: string) => ({ sessionId, notify: notifyFor(ctx, sessionId), t: t() }),
-      }, (props: { sessionId: string; useProjection(name: string): readonly QueuedRow[] | undefined; notify?: (level: 'info' | 'warn' | 'error', text: string) => void; t: ReturnType<typeof translatorFor> }) => React.createElement(QueuePanel, {
+      }, (props: { sessionId: string; useProjection(name: string): readonly QueuedRow[] | undefined; notify?: (level: 'info' | 'warn' | 'error', text: string) => void; t: Translate }) => React.createElement(QueuePanel, {
         ...props,
         settings: React.useSyncExternalStore(settings.subscribe, settings.getSnapshot),
       })))],
@@ -164,20 +161,49 @@ function applyInner(ctx: ClientContext): void {
       off: null,
     },
     {
-      id: 'branchTarget',
-      on: (state) => isOn(state, 'branchTarget'),
+      id: 'projectBrief',
+      on: (state) => isOn(state, 'projectBrief'),
       setup: () => [ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
         name: 'conversation.input.right',
-        id: 'widgets-branch-target',
-        order: 996,
-        inject: (sessionId: string) => ({
-          sessionId,
-          projectPath: projectPathOf(sessionId),
-          startIn,
-          t: t(),
-          notify: notifyFor(ctx, sessionId),
-        }),
-      }, BranchTargetButton))],
+        id: 'widgets-brief',
+        order: 995,
+        inject: (sessionId: string) => ({ sessionId, t: t(), notify: notifyFor(ctx, sessionId) }),
+      }, BriefStatus))],
+      off: null,
+    },
+    {
+      id: 'branchTarget',
+      on: (state) => isOn(state, 'branchTarget'),
+      setup: () => [
+        // The picker rides the New Session row, beside the workspace and the mode controls.
+        ctx.slots.inject('conversation.hero.options', () => ctx.slots.register({
+          name: 'conversation.hero.options',
+          id: 'widgets-target-picker',
+          order: 20,
+          inject: (sessionId: string) => ({
+            sessionId,
+            projectPath: projectPathOf(sessionId),
+            language: targetLanguage(),
+            t: t(),
+            notify: notifyFor(ctx, sessionId),
+            variant: 'picker' as const,
+          }),
+        }, TargetChip)),
+        // Once the chat has started the same widget becomes a read-only marker above the composer.
+        ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+          name: 'conversation.input.dock',
+          id: 'widgets-target-badge',
+          order: 20,
+          inject: (sessionId: string) => ({
+            sessionId,
+            projectPath: projectPathOf(sessionId),
+            language: targetLanguage(),
+            t: t(),
+            notify: notifyFor(ctx, sessionId),
+            variant: 'badge' as const,
+          }),
+        }, TargetChip)),
+      ],
       off: null,
     },
     // Branches in the workspace tree does its work in the Host half; this half adds nothing to the page.
@@ -198,22 +224,32 @@ function applyInner(ctx: ClientContext): void {
     }
   };
 
+  // One stylesheet for every widget, installed once: a class that only exists while one component renders leaves the
+  // others looking like bare browser buttons.
+  const dropStyles = ensureStyles(read(() => (globalThis as unknown as { document?: never }).document));
+
   applyPanels();
   const offSettings = settings.subscribe(applyPanels);
-  void settings.load();
   void models.load();
 
-  // The stores travel through `inject`, so the panel is the component itself and a test can hand it its own stores.
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'widgets',
-    order: 90,
-    label: () => translatorFor(language())('settings.nav'),
-    inject: () => ({ store: settings, models, locale: read(() => ctx.locale) }),
-  }, WidgetSettings));
+  // The section is registered once the switches are known, because its nav label is computed when the settings panel
+  // builds its list: registering before the load answers would freeze the label in whatever language dsh started with,
+  // ignoring a language the user pinned for this plugin.
+  let dropSection: (() => void) | undefined;
+  void settings.load().then(() => {
+    dropSection = ctx.slots.inject('settings.section', () => ctx.slots.register({
+      name: 'settings.section',
+      id: 'widgets',
+      order: 90,
+      label: () => t()('settings.nav'),
+      inject: () => ({ store: settings, models, locale: read(() => ctx.locale) }),
+    }, WidgetSettings));
+  });
 
   ctx.effect?.(() => () => {
     offSettings();
+    dropStyles();
+    dropSection?.();
     for (const panel of panels) {
       if (panel.off !== null) {
         panel.off();
@@ -222,5 +258,6 @@ function applyInner(ctx: ClientContext): void {
     }
   }, 'dsh-widgets: widgets');
 
-  void hostJson;
+  void (undefined as unknown as BriefView);
+  void (undefined as unknown as TargetMode);
 }

@@ -66,7 +66,9 @@ assert.deepEqual(callControls('high', { reasoning: FOUR_LEVELS }), { reasoningEf
 assert.deepEqual(callControls(undefined, { reasoning: FOUR_LEVELS }), { reasoningEffort: 'medium' }, 'the model default');
 assert.deepEqual(callControls(null, { reasoning: FOUR_LEVELS }), { reasoningEffort: 'medium' });
 assert.deepEqual(callControls('', { reasoning: FOUR_LEVELS }), { reasoningEffort: 'medium' });
-assert.deepEqual(callControls('off', { reasoning: FOUR_LEVELS }), {}, 'off means the field is not sent at all');
+// `off` is a level of the ladder, not the absence of one: the adapter turns the level's empty API value into a request
+// without a reasoning field. Dropping the level here would let prepareCall apply the adapter default instead.
+assert.deepEqual(callControls('off', { reasoning: FOUR_LEVELS }), { reasoningEffort: 'off' });
 assert.deepEqual(callControls('medium', { reasoning: FOUR_LEVELS }), { reasoningEffort: 'medium' });
 
 // An effort the model does not declare falls back to the model's own default rather than being clamped or guessed:
@@ -77,7 +79,7 @@ assert.deepEqual(callControls('x'.repeat(80), { reasoning: FOUR_LEVELS }), { rea
 assert.deepEqual(callControls(42, { reasoning: FOUR_LEVELS }), { reasoningEffort: 'medium' });
 
 // A default of "off" is honoured as "send nothing", not as a missing default.
-assert.deepEqual(callControls(undefined, { reasoning: { efforts: [{ id: 'off' }, { id: 'high' }], defaultEffort: 'off' } }), {});
+assert.deepEqual(callControls(undefined, { reasoning: { efforts: [{ id: 'off' }, { id: 'high' }], defaultEffort: 'off' } }), { reasoningEffort: 'off' });
 assert.deepEqual(callControls(undefined, { reasoning: { efforts: [{ id: 'high' }], defaultEffort: 'off' } }), {}, 'an undeclared default is not sent');
 
 // A model whose configuration declares only one level still offers exactly that one.

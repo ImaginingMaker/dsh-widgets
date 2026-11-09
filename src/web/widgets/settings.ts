@@ -1,10 +1,10 @@
 import React from 'react';
-import { MODES, WIDGETS } from '../../shared/types.js';
-import type { ModelRoute, TargetMode, WidgetId } from '../../shared/types.js';
+import { LANGUAGES, MODES, WIDGETS } from '../../shared/types.js';
+import type { LanguageSetting, ModelRoute, TargetMode, WidgetId } from '../../shared/types.js';
 import { matchesQuery, translatorFor } from '../kernel/i18n.js';
 import { isOn } from '../kernel/settingsStore.js';
 import type { SettingsView } from '../kernel/settingsStore.js';
-import { MODE_LABEL } from './branchTarget.js';
+import { MODE_LABEL } from './targetChip.js';
 
 const FIELD: React.CSSProperties = {
   font: 'inherit', fontSize: 12, padding: '3px 6px', borderRadius: 6,
@@ -38,7 +38,11 @@ export function Switch({ on, onChange, label }: SwitchProps): React.ReactElement
 }
 
 export interface WidgetSettingsProps {
-  readonly store: { getSnapshot(): SettingsView; save(body: unknown): Promise<unknown> };
+  readonly store: {
+    getSnapshot(): SettingsView;
+    save(body: unknown): Promise<unknown>;
+    load?(): Promise<unknown>;
+  };
   readonly models: {
     getSnapshot(): { providers: readonly { id: string; name: string; models: readonly { id: string; name: string }[] }[] };
     subscribe(listener: () => void): () => void;
@@ -47,19 +51,29 @@ export interface WidgetSettingsProps {
   readonly locale?: { getSnapshot(): { active?: string } };
 }
 
-/** Settings → Widgets: one row per switch, plus the model and the reasoning effort the Improve prompt call uses. */
+const LANGUAGE_LABEL: Record<LanguageSetting, string> = {
+  auto: 'settings.languageAuto',
+  en: 'English',
+  zh: '中文',
+};
+
+/** Settings → Widgets: one row per switch, one shared model, one language, and the target's default. */
 export function WidgetSettings({ store, models, locale }: WidgetSettingsProps): React.ReactElement {
-  const settings = React.useSyncExternalStore(store.getSnapshot === undefined ? () => () => {} : (listener) => (store as unknown as { subscribe(l: () => void): () => void }).subscribe?.(listener) ?? (() => {}), store.getSnapshot);
+  const settings = React.useSyncExternalStore(
+    (listener) => (store as unknown as { subscribe?(l: () => void): () => void }).subscribe?.(listener) ?? (() => {}),
+    store.getSnapshot,
+  );
   const catalogue = React.useSyncExternalStore(
-    (listener) => (models as unknown as { subscribe(l: () => void): () => void }).subscribe?.(listener) ?? (() => {}),
+    (listener) => (models as unknown as { subscribe?(l: () => void): () => void }).subscribe?.(listener) ?? (() => {}),
     models.getSnapshot,
   );
-  void locale;
 
   const [query, setQuery] = React.useState('');
-  const t = translatorFor(locale?.getSnapshot?.().active);
-  const improve = (settings as SettingsView).improve ?? { model: null, effort: null };
-  const chosen: ModelRoute | null = improve.model ?? null;
+  const t = translatorFor(settings.language === 'en' || settings.language === 'zh'
+    ? settings.language
+    : (String(locale?.getSnapshot?.().active ?? '').toLowerCase().startsWith('zh') ? 'zh' : 'en'));
+  const analysis = settings.analysis ?? { model: null, effort: null };
+  const chosen: ModelRoute | null = analysis.model ?? null;
 
   const [reasoning, setReasoning] = React.useState<{ supported: boolean; efforts: readonly { id: string; name: string; description?: string }[] }>({ supported: false, efforts: [] });
   const key = chosen === null ? '' : `${chosen.provider}/${chosen.model}`;
@@ -75,47 +89,54 @@ export function WidgetSettings({ store, models, locale }: WidgetSettingsProps): 
   const modelValue = chosen === null ? '' : JSON.stringify([chosen.provider, chosen.model]);
 
   const modelMenu = React.createElement('select', {
-    'data-dsh-widgets-improve-model': '', value: modelValue, style: FIELD,
+    className: 'dw-field', 'data-dsh-widgets-analysis-model': '', value: modelValue,
     onChange: (event: React.ChangeEvent<HTMLSelectElement>) => {
       const value = event.target.value;
       const model = value === '' ? null : (() => {
         const [provider, id] = JSON.parse(value) as [string, string];
         return { provider, model: id };
       })();
-      void store.save({ improve: { model, effort: null } });
+      void store.save({ analysis: { model, effort: null } });
     },
   },
   React.createElement('option', { value: '' }, t('settings.modelChat')),
-  ...catalogue.providers.map((provider) => React.createElement('optgroup', { key: provider.id, label: provider.name },
-    ...provider.models.map((model) => React.createElement('option', { key: `${provider.id}/${model.id}`, value: JSON.stringify([provider.id, model.id]) }, model.name)))));
+  ...catalogue.providers.map((providerModal) => React.createElement('optgroup', { key: providerModal.id, label: providerModal.name },
+    ...providerModal.models.map((model) => React.createElement('option', { key: `${providerModal.id}/${model.id}`, value: JSON.stringify([providerModal.id, model.id]) }, model.name)))));
 
-  const effortMenu = reasoning.supported
-    ? React.createElement('select', {
-      'data-dsh-widgets-improve-effort': '', value: improve.effort ?? '', style: FIELD,
-      onChange: (event: React.ChangeEvent<HTMLSelectElement>) => {
-        void store.save({ improve: { effort: event.target.value === '' ? null : event.target.value } });
+  /**
+   * The effort menu only makes sense once a model is chosen: with "same as the chat" the effort belongs to whichever model
+   * that chat runs, and claiming "this model declares no reasoning effort" there would be a plain lie.
+   */
+  const effortMenu = chosen === null
+    ? React.createElement('span', { role: 'status', 'data-dsh-widgets-effort-follows': '', style: LABEL }, t('settings.thinkingFollowsChat'))
+    : reasoning.supported
+      ? React.createElement('select', {
+        className: 'dw-field', 'data-dsh-widgets-analysis-effort': '', value: analysis.effort ?? '',
+        onChange: (event: React.ChangeEvent<HTMLSelectElement>) => {
+          void store.save({ analysis: { effort: event.target.value === '' ? null : event.target.value } });
+        },
       },
-    },
-    React.createElement('option', { value: '' }, t('settings.thinkingDefault')),
-    ...reasoning.efforts.map((entry) => React.createElement('option', { key: entry.id, value: entry.id, title: entry.description }, entry.name)))
-    : React.createElement('span', { role: 'status', 'data-dsh-widgets-effort-none': '', style: LABEL }, t('settings.thinkingNone'));
+      React.createElement('option', { value: '' }, t('settings.thinkingDefault')),
+      ...reasoning.efforts.map((entry) => React.createElement('option', { key: entry.id, value: entry.id, title: entry.description }, entry.name)))
+      : React.createElement('span', { role: 'status', 'data-dsh-widgets-effort-none': '', style: LABEL }, t('settings.thinkingNone'));
+
+  const analysisRow = React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 8 } },
+    React.createElement('span', { style: LABEL }, t('settings.model')), modelMenu,
+    React.createElement('span', { style: LABEL }, t('settings.thinking')), effortMenu,
+    React.createElement('span', { style: { ...LABEL, flexBasis: '100%' } }, t('settings.modelShared')));
 
   const rows = ids.map((id: WidgetId) => React.createElement('div', { key: id, style: ROW, 'data-dsh-widgets-row': id },
     React.createElement('div', { style: { flex: 1, minWidth: 0 } },
       React.createElement('div', { style: { fontSize: 14, lineHeight: '20px' } }, t(`widget.${id}`)),
       React.createElement('div', { style: { ...LABEL, marginTop: 4, lineHeight: '18px' } }, t(`widget.${id}.desc`)),
-      id === 'improvePrompt' && isOn(settings as SettingsView, id)
-        ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 8 } },
-          React.createElement('span', { style: LABEL }, t('settings.model')), modelMenu,
-          React.createElement('span', { style: LABEL }, t('settings.thinking')), effortMenu)
-        : null,
-      id === 'branchTarget' && isOn(settings as SettingsView, id)
+      // The shared model is shown once, under the first widget that uses it.
+      id === 'improvePrompt' && isOn(settings, id) ? analysisRow : null,
+      id === 'branchTarget' && isOn(settings, id)
         ? React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 } },
           React.createElement('span', { style: LABEL }, t('settings.mode')),
           React.createElement('select', {
-            'data-dsh-widgets-default-mode': '',
-            value: (settings as SettingsView).branchTarget?.mode ?? 'current',
-            style: FIELD,
+            className: 'dw-field', 'data-dsh-widgets-default-mode': '',
+            value: settings.branchTarget?.mode ?? 'current',
             onChange: (event: React.ChangeEvent<HTMLSelectElement>) => {
               void store.save({ branchTarget: { mode: event.target.value as TargetMode } });
             },
@@ -123,20 +144,31 @@ export function WidgetSettings({ store, models, locale }: WidgetSettingsProps): 
         : null),
     React.createElement(Switch, {
       'data-dsh-widgets-switch': '',
-      on: isOn(settings as SettingsView, id),
+      on: isOn(settings, id),
       label: t(`widget.${id}`),
       onChange: (next: boolean) => { void store.save({ id, on: next }); },
     })));
 
+  const languageRow = React.createElement('div', { style: { ...ROW, borderBottom: 'none', paddingTop: 0 } },
+    React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+      React.createElement('div', { style: { fontSize: 14, lineHeight: '20px' } }, t('settings.language'))),
+    React.createElement('select', {
+      className: 'dw-field', 'data-dsh-widgets-language': '', value: settings.language ?? 'auto',
+      onChange: (event: React.ChangeEvent<HTMLSelectElement>) => {
+        void store.save({ language: event.target.value as LanguageSetting });
+      },
+    }, LANGUAGES.map((value) => React.createElement('option', { key: value, value }, t(LANGUAGE_LABEL[value])))));
+
   return React.createElement('div', { 'data-dsh-widgets-settings': '' },
     React.createElement('div', { style: { ...LABEL, lineHeight: '18px', paddingBottom: 6 } }, t('settings.intro')),
-    (settings as SettingsView).error === undefined
-      ? null
-      : React.createElement('div', { role: 'alert', style: { fontSize: 12, paddingBottom: 6 } }, t('settings.loadFailed', { error: (settings as SettingsView).error ?? '' })),
+    settings.error === undefined ? null : React.createElement('div', { role: 'alert', className: 'dw-error', style: { paddingBottom: 6 } },
+      t('settings.loadFailed', { error: settings.error })),
+    languageRow,
     React.createElement('input', {
-      type: 'search', value: query, placeholder: t('settings.search'), 'aria-label': t('settings.search'),
+      type: 'search', className: 'dw-field', value: query,
+      placeholder: t('settings.search'), 'aria-label': t('settings.search'),
       'data-dsh-widgets-search': '', onChange: (event: React.ChangeEvent<HTMLInputElement>) => setQuery(event.target.value),
-      style: { ...FIELD, padding: '5px 8px', marginBottom: 6, width: '100%', boxSizing: 'border-box' },
+      style: { padding: '5px 8px', margin: '6px 0', width: '100%', boxSizing: 'border-box' },
     }),
     ids.length === 0
       ? React.createElement('div', { role: 'status', style: { fontSize: 13, padding: '20px 0', textAlign: 'center' } }, t('settings.searchEmpty'))

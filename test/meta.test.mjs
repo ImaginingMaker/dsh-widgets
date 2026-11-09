@@ -51,7 +51,7 @@ assert.match(ci, /actions\/setup-node@/);
 const client = ['src/web/index.ts', 'src/web/kernel/i18n.ts', 'src/web/kernel/plan.ts', 'src/web/widgets/planToggle.ts'].map(read).join('\n');
 const index = ['src/host/index.ts', 'src/host/store.ts', 'src/host/files.ts', 'src/host/routes/improve.ts', 'src/host/routes/models.ts'].map(read).join('\n');
 const bundle = read('dist/web/client.js');
-assert.equal(WIDGETS.length, 6);
+assert.equal(WIDGETS.length, 7);
 for (const id of WIDGETS) {
   // The client half names every widget (the label, the panel or the settings row); the Host half only owns the ones whose
   // work runs outside the browser, which the checks below pin down.

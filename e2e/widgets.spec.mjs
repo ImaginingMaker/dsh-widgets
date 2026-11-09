@@ -2,8 +2,8 @@
 //
 //   npm run e2e
 //
-// What it proves that the unit tests cannot: the bundle patch loads, the client bundle builds and runs, the slot names are
-// the ones dsh publishes, the Host routes answer, and the git side really runs.
+// What it proves that the unit tests cannot: the bundle patch loads, the client bundle runs, the slot names are the ones
+// dsh publishes, `/plan` really toggles plan mode, the project brief really reaches the model, and the git side works.
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -18,19 +18,15 @@ const require = createRequire(import.meta.url);
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Playwright is a development dependency; PLAYWRIGHT can point at another copy.
-const PLAYWRIGHT = process.env.PLAYWRIGHT
-  ?? (() => { try { return join(repo, 'node_modules/playwright'); } catch { return ''; } })();
+const PLAYWRIGHT = process.env.PLAYWRIGHT ?? join(repo, 'node_modules/playwright');
 const { chromium } = require(PLAYWRIGHT);
 
-// CI has no branded Chrome; locally the installed Chrome is the honest target.
-const launchOptions = process.env.PW_CHANNEL ?? (existsSync('/Applications/Google Chrome.app') ? 'chrome' : undefined);
-
-// The dsh under test: the one this repository develops against, or one given as the first argument.
 const dshBin = process.argv[2] ?? join(repo, 'node_modules/@deepseek-ai/dsh/lib/bin.js');
 if (!existsSync(dshBin)) throw new Error(`no dsh CLI at ${dshBin}; run npm install first`);
 
 // ---- a fake model, so no real provider is called ------------------------------------------------------------
+const bodies = [];
+const SUMMARY = 'acme-web is a small demo app. Run the tests with npm test.';
 const fake = createServer((req, res) => {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
@@ -40,13 +36,18 @@ const fake = createServer((req, res) => {
       res.end('{"data":[{"id":"demo"}]}');
       return;
     }
+    bodies.push(body);
+    // A project summary is asked for by the brief prompt; everything else is an ordinary reply.
+    // The plugin asks in the language it was pinned to, so the summary request is recognised in either language.
+    const wantsSummary = /preparing context for a coding task|准备项目背景/.test(body);
     const chunk = (delta, finish) => `data: ${JSON.stringify({
       id: 'x', object: 'chat.completion.chunk', created: 1, model: 'demo',
       choices: [{ index: 0, delta, finish_reason: finish ?? null }],
       ...(finish ? { usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } } : {}),
     })}\n\n`;
     res.writeHead(200, { 'content-type': 'text/event-stream' });
-    res.end(chunk({ role: 'assistant', content: 'Rewritten: make the login form work end to end.' }) + chunk({}, 'stop') + 'data: [DONE]\n\n');
+    const text = wantsSummary ? SUMMARY : 'Sure — here is the plan.';
+    res.end(chunk({ role: 'assistant', content: text }) + chunk({}, 'stop') + 'data: [DONE]\n\n');
   });
 });
 await new Promise((resolve) => fake.listen(0, '127.0.0.1', resolve));
@@ -62,22 +63,39 @@ const openWidgets = async (page) => {
   const direct = page.getByRole('button', { name: 'Settings', exact: true });
   if (await direct.isVisible().catch(() => false)) await direct.click();
   else { await page.getByRole('button', { name: 'Account menu', exact: true }).click(); await page.getByRole('menuitem', { name: /^Settings/ }).click(); }
-  await page.getByRole('button', { name: 'Close' }).first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
-  // The settings nav is a row of buttons; ours is the one this plugin labels "Widgets".
-  const nav = page.getByRole('button', { name: 'Widgets', exact: true });
+  // The app is in English; the plugin is pinned to Chinese on purpose, which is the language override under test.
   try {
-    await nav.first().click({ timeout: 15_000 });
+    try {
+    await page.getByRole('button', { name: '小组件' }).first().click({ timeout: 20_000 });
   } catch (error) {
-    const names = await page.locator('[role="button"], button').evaluateAll((nodes) => nodes.map((n) => (n.innerText || n.getAttribute('aria-label') || '').trim()).filter(Boolean).slice(0, 60));
-    console.error(`--- settings buttons ---\n${JSON.stringify(names)}`);
+    const labels = await page.locator('button').evaluateAll((nodes) => nodes.map((node) => (node.innerText || node.getAttribute('aria-label') || '').trim()).filter(Boolean).slice(0, 60));
+    console.error(`--- settings nav ---\n${JSON.stringify(labels)}`);
+    console.error(`--- console ---\n${consoleLines.slice(-12).join("\n")}`);
+    console.error(`--- page errors ---\n${pageErrors.join("\n")}`);
+    throw error;
+  }
+  } catch (error) {
+    const labels = await page.locator('button').evaluateAll((nodes) => nodes.map((node) => (node.innerText || node.getAttribute('aria-label') || '').trim()).filter(Boolean).slice(0, 80));
+    console.error(`--- buttons after opening Settings ---\n${JSON.stringify(labels)}`);
     throw error;
   }
   await page.locator('[data-dsh-widgets-settings]').waitFor({ state: 'visible', timeout: 20_000 });
 };
 
+const closeSettings = async (page) => {
+  const close = page.getByRole('button', { name: /^Close$/ }).first();
+  if (await close.count()) await close.click();
+  else await page.keyboard.press('Escape');
+  await pause(500);
+};
+
 const results = [];
 const step = (name) => results.push(`  ✓ ${name}`);
+/** Console and page errors of the current page, so a helper can report them. */
+let consoleLines = [];
+let pageErrors = [];
 
+const launchOptions = process.env.PW_CHANNEL ?? (existsSync('/Applications/Google Chrome.app') ? 'chrome' : undefined);
 const browser = await chromium.launch(launchOptions === undefined ? {} : { channel: launchOptions });
 let child;
 let context;
@@ -85,19 +103,17 @@ try {
   const home = await realpath(await mkdtemp(join(tmpdir(), 'dsh-widgets-')));
   const profile = join(home, 'profiles/web');
   await mkdir(join(profile, 'node_modules'), { recursive: true });
-  // The plugin under test, mounted the way `dsh plugin add` mounts it: a package in the profile.
   await symlink(repo, join(profile, 'node_modules/dsh-widgets'));
   await writeFile(join(profile, 'package.json'), JSON.stringify({
     name: 'widgets-test',
     private: true,
-    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-widgets'] } },
+    // `dsh-api-remotes` is what gives a client plugin `ctx.remote.commands`, which Shift+Tab uses for `/plan`.
+    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-api-remotes', 'dsh-widgets'] } },
   }));
   await writeFile(join(profile, 'cordis.yml'), '[]\n');
-  await writeFile(join(profile, 'cordis.patch.yml'), `# A first start shows a welcome dialog whose mask covers the page; mark it as seen.
-- id: ui-settings-general
+  await writeFile(join(profile, 'cordis.patch.yml'), `- id: ui-settings-general
   name: "@deepseek-ai/dsh-client-ui-settings-general"
-  config:
-    welcomeNoticeVersion: 2026-09-28.1
+  config: { welcomeNoticeVersion: 2026-09-28.1 }
 - id: llm-pi-ai
   config:
     providers:
@@ -127,13 +143,17 @@ try {
 
   const project = join(home, 'projects', 'acme-web');
   await mkdir(project, { recursive: true });
-  await writeFile(join(project, 'README.md'), '# acme-web\n');
+  await writeFile(join(project, 'README.md'), '# acme-web\n\nA small demo app. Run `npm test`.\n');
+  await writeFile(join(project, 'AGENTS.md'), 'Keep the tests green.\n');
   git(project, 'init', '-q', '-b', 'main');
   git(project, 'add', '-A');
   git(project, 'commit', '-q', '-m', 'init');
 
   const id = 'ws-1';
   const now = new Date().toISOString();
+  await mkdir(join(home, 'storages/dsh-widgets'), { recursive: true });
+  // The app runs in English; the plugin is pinned to Chinese, so the panel's language is its own choice, not the app's.
+  await writeFile(join(home, 'storages/dsh-widgets/settings.json'), JSON.stringify({ language: 'zh' }));
   await mkdir(join(home, 'storages'), { recursive: true });
   await writeFile(join(home, 'storages/workspace.json'), JSON.stringify({
     unit: { name: 'workspace', version: 2 },
@@ -156,104 +176,145 @@ try {
   const url = `http://127.0.0.1:${port}/?token=${token}`;
   await pause(1500);
 
-  context = await browser.newContext({ locale: 'en-US', viewport: { width: 1280, height: 820 }, colorScheme: 'light' });
+  context = await browser.newContext({ locale: 'en-US', viewport: { width: 1400, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
-  const errors = [];
-  const consoleLines = [];
-  page.on('pageerror', (error) => errors.push(String(error)));
+  consoleLines = [];
+  pageErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(String(error)));
   page.on('console', (message) => consoleLines.push(`${message.type()}: ${message.text()}`));
-  page.on('requestfailed', (request) => consoleLines.push(`failed ${request.url()} ${request.failure()?.errorText ?? ''}`));
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
+
   try {
-    await page.getByRole('button', { name: 'Settings', exact: true }).or(page.getByRole('button', { name: 'Account menu', exact: true })).first().waitFor({ timeout: 60_000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: 'Settings' })
+      .or(page.getByRole('button', { name: 'Account menu' }))
+      .or(page.getByRole('button', { name: /新建会话/ }))
+      .first().waitFor({ timeout: 60_000 });
   } catch (error) {
     await mkdir(join(repo, 'e2e/artifacts'), { recursive: true });
     await page.screenshot({ path: join(repo, 'e2e/artifacts/failure.png'), fullPage: true });
-    const text = (await page.evaluate(() => document.body?.innerText ?? '')).slice(0, 1200);
-    console.error(`--- page text ---\n${text}`);
+    console.error(`--- page text ---\n${(await page.evaluate(() => document.body?.innerText ?? '')).slice(0, 1200)}`);
     console.error(`--- console ---\n${consoleLines.slice(-40).join('\n')}`);
-    console.error(`--- page errors ---\n${errors.join('\n')}`);
     console.error(`--- dsh log ---\n${log.slice(-3000)}`);
     throw error;
   }
   step('dsh started and rendered with dsh-widgets loaded');
+  console.error(`--- ctx keys ---\n${consoleLines.filter((line) => line.includes('[widgets] ctx')).join("\n")}`);
 
+  // 1. The settings section is ours, is Chinese, and has one row per widget.
   await openWidgets(page);
-  const rows = page.locator('[data-dsh-widgets-row]');
-  assert.equal(await rows.count(), 6, 'six widget rows');
-  step('Settings → Widgets shows the six rows');
+  assert.equal(await page.locator('[data-dsh-widgets-row]').count(), 7, 'seven widget rows');
+  assert.equal(await page.locator('[data-dsh-widgets-row="projectBrief"]').count(), 1);
+  const sectionText = await page.locator('[data-dsh-widgets-settings]').innerText();
+  assert.match(sectionText, /项目基本信息/, 'the panel speaks the app language');
+  assert.equal(/Branch per chat/.test(sectionText), false, 'no English left in a Chinese panel');
+  step('Settings → 小组件 shows seven rows, in Chinese');
 
-  // Off by default, and switching it on reaches the Host's settings file.
-  const branchTree = page.locator('[data-dsh-widgets-row="branchTree"] [data-dsh-widgets-switch]');
-  assert.equal(await branchTree.getAttribute('aria-checked'), 'false', 'Branches in the workspace tree is off by default');
-  await branchTree.click();
+  // 2. Off by default, and switching it on reaches the Host's settings file.
+  const briefSwitch = page.locator('[data-dsh-widgets-row="projectBrief"] [data-dsh-widgets-switch]');
+  assert.equal(await briefSwitch.getAttribute('aria-checked'), 'false', 'Project brief is off by default');
+  await briefSwitch.click();
   await page.waitForFunction(
-    () => document.querySelector('[data-dsh-widgets-row="branchTree"] [data-dsh-widgets-switch]')?.getAttribute('aria-checked') === 'true',
-    null,
-    { timeout: 10_000 },
+    () => document.querySelector('[data-dsh-widgets-row="projectBrief"] [data-dsh-widgets-switch]')?.getAttribute('aria-checked') === 'true',
+    null, { timeout: 10_000 },
   );
   await pause(500);
-  const saved = JSON.parse(readFileSync(join(home, 'storages/dsh-widgets/settings.json'), 'utf8'));
-  assert.equal(saved.on.branchTree, true, 'the switch reached the Host settings file');
+  const settingsFile = join(home, 'storages/dsh-widgets/settings.json');
+  assert.equal(JSON.parse(readFileSync(settingsFile, 'utf8')).on.projectBrief, true);
   step('a switch writes storages/dsh-widgets/settings.json');
 
-  // The reasoning menu follows the local model configuration.
-  const modelMenu = page.locator('[data-dsh-widgets-improve-model]');
+  // 3. One shared model, and the ladder read from the configuration.
+  const modelMenu = page.locator('[data-dsh-widgets-analysis-model]');
   await modelMenu.waitFor({ state: 'visible', timeout: 10_000 });
-  const options = await modelMenu.locator('option').allTextContents();
-  assert.ok(options.includes('Same as the chat'), 'the first entry follows the chat');
+  assert.ok((await modelMenu.locator('option').allTextContents()).includes('跟随会话模型'));
   await modelMenu.selectOption({ label: 'Demo model' });
   await pause(700);
   assert.equal(await page.locator('[data-dsh-widgets-effort-none]').count(), 1, 'a model with no efforts says so');
-  step('a model without reasoningEfforts offers no effort menu');
 
   await modelMenu.selectOption({ label: 'Demo thinking' });
-  await page.locator('[data-dsh-widgets-improve-effort]').waitFor({ state: 'visible', timeout: 10_000 });
-  const efforts = await page.locator('[data-dsh-widgets-improve-effort] option').evaluateAll((nodes) => nodes.map((node) => node.value));
-  assert.deepEqual(efforts, ['', 'off', 'low', 'high'], 'the ladder comes from the model configuration');
-  await page.locator('[data-dsh-widgets-improve-effort]').selectOption('high');
+  await page.locator('[data-dsh-widgets-analysis-effort]').waitFor({ state: 'visible', timeout: 10_000 });
+  const efforts = await page.locator('[data-dsh-widgets-analysis-effort] option').evaluateAll((nodes) => nodes.map((node) => node.value));
+  assert.deepEqual(efforts, ['', 'off', 'low', 'high'], 'off is offered like any other level');
+  await page.locator('[data-dsh-widgets-analysis-effort]').selectOption('off');
   await pause(500);
-  assert.equal(JSON.parse(readFileSync(join(home, 'storages/dsh-widgets/settings.json'), 'utf8')).improve.effort, 'high');
-  step('the reasoning ladder is read from the model configuration, and the choice is saved');
+  assert.equal(JSON.parse(readFileSync(settingsFile, 'utf8')).analysis.effort, 'off');
+  step('the reasoning ladder comes from the model configuration, and off is a level of it');
+  await closeSettings(page);
+  await pause(800);
 
-  await page.keyboard.press('Escape');
-  await pause(500);
+  // 4. The target chip sits on the New Session row, beside the mode control, and speaks Chinese.
+  const chip = page.locator('[data-dsh-widgets-target="picker"]');
+  await chip.waitFor({ state: 'visible', timeout: 20_000 });
+  assert.match(await chip.innerText(), /main/, 'the chip names the branch the task will run on');
+  const chipBox = await chip.boundingBox();
+  const modeBox = await page.getByRole('button', { name: /标准模式|Standard/ }).first().boundingBox().catch(() => null);
+  if (modeBox !== null && chipBox !== null) {
+    assert.ok(Math.abs(chipBox.y - modeBox.y) < 40, `the chip is on the same row as the mode control (chip ${chipBox.y}, mode ${modeBox.y})`);
+  }
+  step('the target chip rides the New Session row, in the app language');
 
-  // The target picker rides the composer slot and the Host answers with the real branch.
-  const branchButton = page.locator('[data-dsh-widgets-branch-open]').first();
-  await branchButton.waitFor({ state: 'visible', timeout: 25_000 });
-  await branchButton.click();
-  await page.locator('[data-dsh-widgets-branch-panel]').waitFor({ state: 'visible', timeout: 10_000 });
-  const modes = await page.locator('[data-dsh-widgets-mode] option').evaluateAll((nodes) => nodes.map((node) => node.value));
-  assert.deepEqual(modes, ['current', 'branch', 'worktree', 'existing-branch', 'existing-worktree']);
-  assert.equal(await page.locator('[data-dsh-widgets-mode]').inputValue(), 'current', 'the current branch is the default');
-  step('the target picker is in the composer with all five modes, defaulting to the current branch');
+  // 5. The wand has no box of its own: the shared stylesheet owns how it looks.
+  const wand = page.locator('[data-dsh-widgets-wand]').first();
+  await wand.waitFor({ state: 'visible', timeout: 10_000 });
+  const border = await wand.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return `${style.borderTopWidth} ${style.borderTopStyle} ${style.backgroundColor}`;
+  });
+  assert.match(border, /^0px none/, `the wand draws no border (${border})`);
+  step('the Improve prompt icon has no border and no background of its own');
 
-  // A new worktree really creates a branch and a checkout — through the real Host route and real git.
-  await page.locator('[data-dsh-widgets-mode]').selectOption('worktree');
-  await page.locator('[data-dsh-widgets-branch-name]').fill('feat/from-the-app');
-  await page.locator('[data-dsh-widgets-branch-start]').click();
-  await page.waitForFunction(() => !document.querySelector('[data-dsh-widgets-branch-panel]'), null, { timeout: 30_000 });
-  await pause(900);
-  assert.equal(existsSync(join(project, '.worktrees', 'feat-from-the-app')), true, 'the worktree folder exists on disk');
-  assert.equal(git(join(project, '.worktrees', 'feat-from-the-app'), 'rev-parse', '--abbrev-ref', 'HEAD').trim(), 'feat/from-the-app');
-  assert.equal(git(project, 'rev-parse', '--abbrev-ref', 'HEAD').trim(), 'main', 'the project folder stayed on its branch');
-  step('a new worktree created a real branch and checkout, and left the project folder alone');
+  // 6. The project brief is read quietly, and its own icon says so.
+  const briefIcon = page.locator('[data-dsh-widgets-brief]').first();
+  await briefIcon.waitFor({ state: 'visible', timeout: 20_000 });
+  await pause(4000);
+  const briefState = await page.evaluate(() => {
+    const node = document.querySelector('[data-dsh-widgets-brief]');
+    return { attr: node?.getAttribute('data-dsh-widgets-brief'), title: node?.getAttribute('title'), label: node?.getAttribute('aria-label') };
+  });
+  console.error(`--- brief state ---\n${JSON.stringify(briefState)}`);
+  console.error(`--- brief store ---\n${readFileSync(join(home, 'storages/dsh-widgets/project-briefs.json'), 'utf8').slice(0, 600)}`);
+  await page.waitForFunction(
+    () => document.querySelector('[data-dsh-widgets-brief]')?.getAttribute('data-dsh-widgets-brief') === 'ready',
+    null, { timeout: 60_000 },
+  );
+  step('the project brief is read in the background and reports itself ready');
 
-  // Shift+Tab writes the /plan prefix dsh recognises, in the real composer.
+  // 7. The first task opens with the project summary.
   const composer = page.locator('[data-composer-input]').first();
   await composer.waitFor({ state: 'visible', timeout: 20_000 });
   await composer.click();
-  await page.keyboard.press('Shift+Tab');
-  await pause(500);
-  const draft = await composer.innerText();
-  assert.match(draft, /^\/plan\s*$/, `the composer holds the plan prefix, got ${JSON.stringify(draft)}`);
-  await page.keyboard.press('Shift+Tab');
-  await pause(500);
-  assert.equal((await composer.innerText()).trim(), '', 'Shift+Tab again removes it');
-  step('Shift+Tab writes and removes the /plan prefix in the real composer');
+  bodies.length = 0;
+  await page.keyboard.type('把测试跑一遍');
+  await page.keyboard.press('Enter');
+  await pause(6000);
+  assert.ok(bodies.length > 0, 'the model was called');
+  assert.ok(bodies.some((body) => body.includes('acme-web is a small demo app')), 'the first task opens with the project summary');
+  step('the first task in the project opens with the summary, as a prompt');
 
-  assert.deepEqual(errors, [], 'no page error');
+  // 8. In a chat that now exists, Shift+Tab turns plan mode on through dsh's own command: the draft stays empty, and the
+  //    next request carries the policy dsh attaches to a plan-mode turn.
+  await composer.click();
+  await page.keyboard.press('Shift+Tab');
+  await pause(1200);
+  assert.equal((await composer.innerText()).trim(), '', 'turning plan mode on writes nothing into the draft');
+
+  bodies.length = 0;
+  await page.keyboard.type('继续');
+  await page.keyboard.press('Enter');
+  await pause(6000);
+  const second = bodies.join('\n');
+  assert.ok(bodies.length > 0, 'the second message reached the model');
+  assert.match(second, /exit_plan_mode|plan mode/i, `the next request carries dsh's plan-mode policy (${second.slice(0, 160)})`);
+  step('Shift+Tab turns plan mode on through dsh\'s own command: the next request carries the policy, the draft stays empty');
+
+  // 8. Once the chat has started the target is a read-only marker rather than a picker.
+  await pause(500);
+  const markers = page.locator('[data-dsh-widgets-target]');
+  const tagNames = await markers.evaluateAll((nodes) => nodes.map((node) => `${node.tagName.toLowerCase()}:${node.getAttribute('data-readonly')}`));
+  assert.ok(tagNames.every((entry) => entry.startsWith('span') || entry.endsWith('true')) || tagNames.length === 0,
+    `a started chat offers no way to switch where it runs (${JSON.stringify(tagNames)})`);
+  step('the target is read-only once the chat has started');
+
+  assert.deepEqual(pageErrors, [], 'no page error');
   console.log(`dsh ${dshBin}\n${results.join('\n')}`);
 } finally {
   await context?.close().catch(() => {});

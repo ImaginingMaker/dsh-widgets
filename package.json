@@ -1,7 +1,7 @@
 {
   "name": "dsh-widgets",
-  "version": "0.2.0",
-  "description": "Small, independent widgets for the DeepSeek Harness UI: a branch/worktree target picker that defaults to the current branch, opt-in branch folders in the workspace tree, a Shift+Tab /plan toggle, drag-and-drop and in-place editing of the message queue, and an Improve prompt button with its own model, thinking switch and thinking effort.",
+  "version": "0.3.0",
+  "description": "Small, independently switchable widgets for the DeepSeek Harness UI: a branch/worktree target chosen on the New Session row and carried out by the agent, opt-in branch folders in the workspace tree, a Shift+Tab plan-mode toggle through dsh's own command, drag-and-drop and in-place editing of the message queue, an Improve prompt wand, and a quiet project brief that opens the first task.",
   "icon": "./assets/icon.svg",
   "license": "MIT",
   "type": "module",

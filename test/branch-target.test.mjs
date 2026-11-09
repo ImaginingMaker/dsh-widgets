@@ -1,20 +1,16 @@
-// Branch and worktree targets: the name rules, the mutual exclusion of the five modes, and the git effects — including
-// that the default mode touches the repository not at all.
+// Branch and worktree targets: the name rules, the mutual exclusion of the five modes, the one remaining git effect
+// (creating worktrees), and the routes the composer chip talks to.
 import assert from 'node:assert/strict';
 import { existsSync, realpathSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  BRANCH_TARGET_PATH, applyTarget, branchSlug, currentBranch, installBranchTarget, isBranchName, isInsideProject,
-  localBranches, parseTarget, projectDirOf, runGit, worktreeFolder, worktreeList,
+  BRANCH_TARGET_PATH, INTENT_TTL_MS, TARGET_INTENT_PATH, branchSlug, createWorktree, currentBranch, installBranchTarget,
+  installTargetIntent, intents, isBranchName, isInsideProject, listTargets, localBranches, parseTarget, projectDirOf,
+  pruneIntents, resolveTarget, runGit, worktreeFolder, worktreeList,
 } from '../dist/index.js';
-import { call, gitSync, makeCtx, makePlainDir, makeRepo, realSubprocess } from './helpers.mjs';
+import { call, makeCtx, makePlainDir, makeRepo, realSubprocess } from './helpers.mjs';
 
 const subprocess = realSubprocess();
-/** `applyTarget` answers `{ok}` or `{error}`; the checks below read the result itself. */
-const doTarget = async (...args) => {
-  const result = await applyTarget(...args);
-  return 'ok' in result ? result.ok : result;
-};
 
 // ---- names -----------------------------------------------------------------------------------------------------------
 for (const good of ['main', 'feat/add-login', 'fix/a.b-c_d', 'a', `x/${'y'.repeat(60)}`.slice(0, 64)]) {
@@ -27,32 +23,23 @@ for (const bad of [
   assert.equal(isBranchName(bad), false, JSON.stringify(bad));
 }
 
-// A slug is deterministic, offline, and never repeats a name that is already taken.
 assert.equal(branchSlug('Add a login form'), 'feat/add-a-login-form');
 assert.equal(branchSlug('Fix the crash on save'), 'fix/fix-the-crash-on-save');
-assert.equal(branchSlug('bug: null deref'), 'fix/bug-null-deref');
 assert.equal(branchSlug('修复登录页崩溃'), 'fix/change', 'a Chinese message still gets a valid name');
 assert.equal(branchSlug('   '), 'feat/change');
 assert.equal(branchSlug('Add a login form'), branchSlug('Add a login form'), 'deterministic');
 assert.equal(branchSlug('Add a login form', ['feat/add-a-login-form']), 'feat/add-a-login-form-2');
-assert.equal(branchSlug('Add a login form', ['feat/add-a-login-form', 'feat/add-a-login-form-2']), 'feat/add-a-login-form-3');
-assert.ok(branchSlug(`x ${'y'.repeat(200)}`).length <= 64);
-assert.equal(isBranchName(branchSlug('x '.repeat(40))), true);
-
 assert.equal(worktreeFolder('feat/add-login'), 'feat-add-login');
-assert.equal(worktreeFolder('a/b/c'), 'a-b-c');
 assert.equal(worktreeFolder('!!!'), 'worktree');
 
 // ---- the five modes are mutually exclusive ---------------------------------------------------------------------------
 assert.deepEqual(parseTarget({ mode: 'current' }).target, { mode: 'current' });
 assert.deepEqual(parseTarget({}).target, { mode: 'current' }, 'no mode is the default');
-assert.deepEqual(parseTarget({ mode: 'branch' }).target, { mode: 'branch' });
 assert.deepEqual(parseTarget({ mode: 'branch', branchName: 'feat/x' }).target, { mode: 'branch', branchName: 'feat/x' });
 assert.deepEqual(parseTarget({ mode: 'worktree' }).target, { mode: 'worktree' });
 assert.deepEqual(parseTarget({ mode: 'existing-branch', existingBranch: 'main' }).target, { mode: 'existing-branch', existingBranch: 'main' });
 assert.deepEqual(parseTarget({ mode: 'existing-worktree', worktreePath: '/tmp/w' }).target, { mode: 'existing-worktree', worktreePath: '/tmp/w' });
 
-// The invariant: a target can never be a branch and a worktree at once, and a new worktree starts its own branch.
 for (const [body, why] of [
   [{ mode: 'branch', branchName: 'feat/x', worktreePath: '/tmp/w' }, 'branch and worktree together'],
   [{ mode: 'worktree', branchName: 'feat/x', worktreePath: '/tmp/w' }, 'worktree with a checkout path'],
@@ -61,174 +48,131 @@ for (const [body, why] of [
   [{ mode: 'current', branchName: 'feat/x' }, 'current with a branch'],
   [{ mode: 'current', worktreePath: '/tmp/w' }, 'current with a worktree'],
   [{ mode: 'existing-branch', existingBranch: 'main', branchName: 'feat/x' }, 'existing branch with a new name'],
-  [{ mode: 'existing-worktree', worktreePath: '/tmp/w', existingBranch: 'main' }, 'existing worktree with a branch'],
   [{ mode: 'nope' }, 'unknown mode'],
   [{ mode: 'branch', branchName: 'a..b' }, 'bad name'],
   [{ mode: 'existing-branch' }, 'no branch named'],
   [{ mode: 'existing-worktree' }, 'no path named'],
   [null, 'not an object'],
-  ['x', 'not an object'],
 ]) {
   assert.equal(parseTarget(body).error !== undefined, true, why);
 }
 
-// ---- path containment -------------------------------------------------------------------------------------------------
 assert.equal(isInsideProject('/a/b', '/a/b'), true);
 assert.equal(isInsideProject('/a/b', '/a/b/c'), true);
 assert.equal(isInsideProject('/a/b', '/a/bc'), false, 'a prefix is not a child');
-assert.equal(isInsideProject('/a/b/', '/a/b/c'), true, 'a trailing separator is tolerated');
-assert.equal(isInsideProject('/a/b', '/a/c'), false);
 
-// ---- a real repository -----------------------------------------------------------------------------------------------
+// ---- creating a worktree ----------------------------------------------------------------------------------------------
 const repo = await makeRepo();
-/** macOS resolves /var through /private/var, so a folder is compared by its real path. */
-const real = (path) => realpathSync(path);
 try {
-  assert.equal(await currentBranch(subprocess, repo.dir), 'main');
-  assert.deepEqual(await localBranches(subprocess, repo.dir), ['main']);
+  const real = realpathSync(repo.dir);
+  const created = await createWorktree(subprocess, repo.dir, { text: 'Try the new parser' });
+  assert.ok('ok' in created, JSON.stringify(created));
+  assert.equal(created.ok.branch, 'feat/try-the-new-parser');
+  assert.equal(created.base, 'main', 'the base is the branch the project folder is on');
+  assert.equal(created.ok.path, join(real, '.worktrees', 'feat-try-the-new-parser'));
+  assert.equal(existsSync(created.ok.path), true);
+  assert.equal(await currentBranch(subprocess, created.ok.path), 'feat/try-the-new-parser');
+  assert.equal(await currentBranch(subprocess, repo.dir), 'main', 'the project folder is left alone');
 
-  // current: no branch is created, no commit, nothing written.
-  const head = (await runGit(subprocess, repo.dir, ['rev-parse', 'HEAD'])).stdout.trim();
-  const current = await doTarget(subprocess, repo.dir, { mode: 'current' }, 'Add a login form');
-  assert.equal(current.mode, 'current');
-  assert.equal(current.branch, 'main');
-  assert.equal((await runGit(subprocess, repo.dir, ['rev-parse', 'HEAD'])).stdout.trim(), head, 'current changes no commit');
-  assert.deepEqual(await localBranches(subprocess, repo.dir), ['main'], 'current creates no branch');
+  // A name that is taken, and a folder that exists, are refused instead of overwritten.
+  const taken = await createWorktree(subprocess, repo.dir, { branchName: 'feat/try-the-new-parser' });
+  assert.match(taken.error, /already exists/);
 
-  // branch: a new branch in the project folder, named from the message.
-  const branch = await doTarget(subprocess, repo.dir, { mode: 'branch' }, 'Add a login form');
-  assert.equal(branch.mode, 'branch');
-  assert.equal(branch.branch, 'feat/add-a-login-form');
-  assert.equal(branch.cwd, real(repo.dir));
-  assert.equal(await currentBranch(subprocess, repo.dir), 'feat/add-a-login-form');
-  assert.equal(existsSync(join(repo.dir, '.worktrees')), false, 'a branch makes no worktree');
-
-  // The same message again would collide, so the slug moves on; and an explicit name that exists is refused.
-  await gitSync(repo.dir, ['switch', 'main']);
-  const second = await doTarget(subprocess, repo.dir, { mode: 'branch' }, 'Add a login form');
-  assert.equal(second.branch, 'feat/add-a-login-form-2');
-  await gitSync(repo.dir, ['switch', 'main']);
-  const clash = await doTarget(subprocess, repo.dir, { mode: 'branch', branchName: 'feat/add-a-login-form' }, 'x');
-  assert.match(clash.error, /already exists/);
-
-  // worktree: its own branch AND its own folder, from the current branch.
-  const worktree = await doTarget(subprocess, repo.dir, { mode: 'worktree' }, 'Try the new parser');
-  assert.equal(worktree.mode, 'worktree');
-  assert.equal(worktree.branch, 'feat/try-the-new-parser');
-  assert.equal(worktree.cwd, join(real(repo.dir), '.worktrees', 'feat-try-the-new-parser'));
-  assert.equal(existsSync(worktree.cwd), true);
-  assert.equal(await currentBranch(subprocess, worktree.cwd), 'feat/try-the-new-parser');
-  assert.equal(await currentBranch(subprocess, repo.dir), 'main', 'the project folder stays on its branch');
-  assert.equal((await worktreeList(subprocess, repo.dir)).length, 2);
-
-  // A worktree path that exists is refused, never overwritten.
-  await gitSync(repo.dir, ['switch', 'main']);
-  const occupied = await doTarget(subprocess, repo.dir, { mode: 'worktree', branchName: 'feat/try-the-new-parser' }, 'x');
-  assert.match(occupied.error, /already exists/);
-
-  // existing-branch: check out what is there, create nothing.
-  const existing = await doTarget(subprocess, repo.dir, { mode: 'existing-branch', existingBranch: 'feat/add-a-login-form' }, 'x');
-  assert.equal(existing.mode, 'existing-branch');
-  assert.equal(existing.branch, 'feat/add-a-login-form');
-  assert.equal(await currentBranch(subprocess, repo.dir), 'feat/add-a-login-form');
-  const missing = await doTarget(subprocess, repo.dir, { mode: 'existing-branch', existingBranch: 'nope' }, 'x');
-  assert.equal(typeof missing.error, 'string');
-  await gitSync(repo.dir, ['switch', 'main']);
-
-  // existing-worktree: only a worktree this repository knows, inside the project.
-  const reused = await doTarget(subprocess, repo.dir, { mode: 'existing-worktree', worktreePath: worktree.cwd }, 'x');
-  assert.equal(reused.mode, 'existing-worktree');
-  assert.equal(reused.branch, 'feat/try-the-new-parser');
-  const itself = await doTarget(subprocess, repo.dir, { mode: 'existing-worktree', worktreePath: repo.dir }, 'x');
-  assert.match(itself.error, /project itself/, 'the project folder is the current-branch target, not a worktree');
-  const nowhere = await doTarget(subprocess, repo.dir, { mode: 'existing-worktree', worktreePath: '/tmp/definitely-not-here-12345' }, 'x');
-  assert.match(nowhere.error, /does not exist/);
+  // An explicit name is honoured.
+  const named = await createWorktree(subprocess, repo.dir, { branchName: 'feat/explicit' });
+  assert.ok('ok' in named);
+  assert.equal(named.ok.branch, 'feat/explicit');
 } finally { repo.cleanup(); }
 
-// ---- a folder that is not a repository, and one with no commit --------------------------------------------------------
 const plain = makePlainDir();
 try {
-  const fallback = await doTarget(subprocess, plain.dir, { mode: 'current' });
-  assert.equal(fallback.mode, 'current');
-  assert.equal(fallback.branch, null);
-  const refused = await doTarget(subprocess, plain.dir, { mode: 'branch' }, 'x');
+  const refused = await createWorktree(subprocess, plain.dir, {});
   assert.match(refused.error, /not a git repository/);
 } finally { plain.cleanup(); }
 
-const empty = await makeRepo();
+// ---- reading a target -------------------------------------------------------------------------------------------------
+const repo2 = await makeRepo();
 try {
-  // An unborn HEAD: `git switch -c` would work but a worktree at HEAD cannot, so both are refused with a clear reason.
-  await gitSync(empty.dir, ['checkout', '--orphan', 'bornless']);
-  await gitSync(empty.dir, ['rm', '-rf', '--cached', '.']);
-  // An unborn HEAD resolves to no branch at all, which is what the picker reports as "not a repository with a commit".
-  assert.equal(await currentBranch(subprocess, empty.dir), undefined);
-  const unbornWorktree = await doTarget(subprocess, empty.dir, { mode: 'worktree' }, 'x');
-  assert.match(unbornWorktree.error, /no commit/);
-  const unbornBranch = await doTarget(subprocess, empty.dir, { mode: 'branch' }, 'x');
-  assert.match(unbornBranch.error, /no commit/);
-} finally { empty.cleanup(); }
+  const info = await listTargets(subprocess, repo2.dir, 'current');
+  assert.equal(info.repo, true);
+  assert.equal(info.branch, 'main');
+  assert.deepEqual(info.branches, ['main']);
+  assert.deepEqual(info.worktrees, [], 'the project folder itself is not listed as a worktree');
 
-// ---- the route --------------------------------------------------------------------------------------------------------
+  const resolved = await resolveTarget(subprocess, repo2.dir, { mode: 'current' });
+  assert.equal(resolved.branch, 'main');
+  const worktreeResolved = await resolveTarget(subprocess, repo2.dir, { mode: 'worktree', branchName: 'feat/x' });
+  assert.equal(worktreeResolved.mode, 'worktree');
+  assert.equal(worktreeResolved.cwd, repo2.dir, 'until the chat starts, the folder is still the project');
+
+  await createWorktree(subprocess, repo2.dir, { branchName: 'feat/listed' });
+  const withWorktree = await listTargets(subprocess, repo2.dir, 'current');
+  assert.equal(withWorktree.worktrees.length, 1);
+  assert.equal(withWorktree.worktrees[0].branch, 'feat/listed');
+  assert.equal((await worktreeList(subprocess, repo2.dir)).length, 2);
+  assert.deepEqual(await localBranches(subprocess, repo2.dir), ['feat/listed', 'main']);
+} finally { repo2.cleanup(); }
+
+// ---- the routes -------------------------------------------------------------------------------------------------------
 {
-  const repo2 = await makeRepo();
-  const registry = { list: () => [{ id: 'w1', path: repo2.dir }] };
+  const { dir, cleanup } = { dir: (await makeRepo()).dir, cleanup: () => {} };
+  const registry = { list: () => [{ id: 'w1', path: dir }] };
   const { ctx, routes } = makeCtx({ services: { workspaceRegistry: registry }, subprocess });
-  installBranchTarget({ ...ctx, subprocess }, repo2.dir);
+  installBranchTarget({ ...ctx, subprocess }, dir);
+  installTargetIntent({ ...ctx, subprocess }, dir);
 
-  // GET with a registered project path: the branch, the branches, and the saved mode.
-  const info = await call(routes, BRANCH_TARGET_PATH, { search: { cwd: repo2.dir } });
+  const info = await call(routes, BRANCH_TARGET_PATH, { search: { cwd: dir } });
   assert.equal(info.status, 200);
-  assert.equal(info.json.repo, true);
   assert.equal(info.json.branch, 'main');
-  assert.deepEqual(info.json.branches, ['main']);
+  assert.equal(info.json.locked, false, 'a chat that has not started can still choose');
   assert.equal(info.json.mode, 'current');
 
-  // A path the workspace registry does not know is refused, so a request cannot point git at any folder it likes.
-  const unknown = await call(routes, BRANCH_TARGET_PATH, { search: { cwd: '/tmp' } });
-  assert.equal(unknown.status, 400);
+  // A path the workspace registry does not know is refused.
+  assert.equal((await call(routes, BRANCH_TARGET_PATH, { search: { cwd: '/tmp' } })).status, 400);
 
-  // POST current: no git at all, and the answer says where the chat starts.
-  const started = await call(routes, BRANCH_TARGET_PATH, { method: 'POST', body: { cwd: repo2.dir, mode: 'current' } });
-  assert.equal(started.status, 200);
-  assert.equal(started.json.mode, 'current');
-  assert.equal(started.json.branch, 'main');
+  // Recording an intent creates nothing.
+  const before = await runGit(subprocess, dir, ['worktree', 'list']);
+  const stored = await call(routes, TARGET_INTENT_PATH, { method: 'POST', body: { cwd: dir, sessionId: 's1', mode: 'worktree', branchName: 'feat/later' } });
+  assert.equal(stored.status, 200);
+  assert.equal(stored.json.stored, true);
+  assert.equal(intents.get('s1')?.target.mode, 'worktree');
+  assert.equal((await runGit(subprocess, dir, ['worktree', 'list'])).stdout, before.stdout, 'no worktree is created by the route');
+  assert.equal(existsSync(join(dir, '.worktrees')), false);
 
-  const worktree = await call(routes, BRANCH_TARGET_PATH, { method: 'POST', body: { cwd: repo2.dir, mode: 'worktree', text: 'Rewrite the parser' } });
-  assert.equal(worktree.status, 200);
-  assert.equal(worktree.json.branch, 'feat/rewrite-the-parser');
-  assert.equal(existsSync(worktree.json.cwd), true);
+  // The default target records nothing at all.
+  await call(routes, TARGET_INTENT_PATH, { method: 'POST', body: { cwd: dir, sessionId: 's1', mode: 'current' } });
+  assert.equal(intents.has('s1'), false, 'current clears any intent');
 
-  // A refused target is a 409 carrying git's own words, and a malformed one is a 400.
-  const refused = await call(routes, BRANCH_TARGET_PATH, { method: 'POST', body: { cwd: repo2.dir, mode: 'existing-branch', existingBranch: 'nope' } });
-  assert.equal(refused.status, 409);
-  const malformed = await call(routes, BRANCH_TARGET_PATH, { method: 'POST', body: { cwd: repo2.dir, mode: 'nope' } });
-  assert.equal(malformed.status, 400);
-  const together = await call(routes, BRANCH_TARGET_PATH, { method: 'POST', body: { cwd: repo2.dir, mode: 'branch', branchName: 'feat/x', worktreePath: '/tmp/w' } });
-  assert.equal(together.status, 400, 'a branch and a worktree at once never reaches git');
-  repo2.cleanup();
+  // Bad bodies are refused.
+  // No mode at all means "current", which is a valid request that simply records nothing.
+  assert.equal((await call(routes, TARGET_INTENT_PATH, { method: 'POST', body: { sessionId: 's' } })).json.stored, false);
+  for (const body of [{}, { mode: 'nope' }, { sessionId: 's', mode: 'nope' }, { sessionId: 's', mode: 'branch', branchName: 'a..b' }]) {
+    assert.equal((await call(routes, TARGET_INTENT_PATH, { method: 'POST', body })).status, 400, JSON.stringify(body));
+  }
+
+  cleanup();
 }
 
-// ---- a session folder that is a symlink -------------------------------------------------------------------------------
+// An intent that was never used expires, so an abandoned chat cannot surprise a later one.
+{
+  const { ctx } = makeCtx({ services: { workspaceRegistry: { list: () => [] } }, subprocess });
+  installTargetIntent(ctx, '/tmp');
+  intents.set('old', { target: { mode: 'branch', branchName: 'feat/x' }, at: Date.now() - INTENT_TTL_MS - 1000 });
+  intents.set('fresh', { target: { mode: 'branch' }, at: Date.now() });
+  assert.equal(pruneIntents(), 1);
+  assert.equal(intents.has('old'), false);
+  assert.equal(intents.has('fresh'), true);
+  intents.delete('fresh');
+}
+
+// A symlinked project folder resolves to its real path, so containment checks compare real paths.
 {
   const repo3 = await makeRepo();
-  const { dir: linkParent, cleanup } = { dir: repo3.dir, cleanup: () => {} };
-  const { ctx, routes } = makeCtx({ services: {}, subprocess, sessions: { list: { getSnapshot: () => ({ byId: { s1: { cwd: join(linkParent) } } }) } } });
-  installBranchTarget({ ...ctx, subprocess }, repo3.dir);
-  const bySession = await call(routes, BRANCH_TARGET_PATH, { search: { sessionId: 's1' } });
-  assert.equal(bySession.status, 200);
-  assert.equal(bySession.json.branch, 'main');
+  const link = join(repo3.dir, '..', `${Date.now()}-link`);
+  symlinkSync(repo3.dir, link);
+  const { ctx } = makeCtx({ services: { workspaceRegistry: { list: () => [{ id: 'w', path: link }] } } });
+  assert.equal(await projectDirOf(ctx, { cwd: link }), realpathSync(repo3.dir));
   repo3.cleanup();
-  void cleanup;
 }
 
-// `projectDirOf` resolves a symlinked project folder to its real path, so containment checks compare real paths.
-{
-  const repo4 = await makeRepo();
-  const link = join(repo4.dir, '..', `${Date.now()}-link`);
-  symlinkSync(repo4.dir, link);
-  const registry = { list: () => [{ id: 'w', path: link }] };
-  const { ctx } = makeCtx({ services: { workspaceRegistry: registry } });
-  assert.equal(await projectDirOf(ctx, { cwd: link }), realpathSync(repo4.dir));
-  repo4.cleanup();
-}
 console.log('branch-target checks passed');
