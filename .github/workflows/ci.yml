@@ -1,0 +1,31 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    name: node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # The branch and worktree tests run real git in a temporary repository.
+      - name: git identity for the test repositories
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          git --version
+      - name: unit tests
+        run: npm test

@@ -1,0 +1,74 @@
+{
+  "name": "dsh-widgets",
+  "version": "0.1.0",
+  "description": "Small, independent widgets for the DeepSeek Harness UI: a branch/worktree target picker that defaults to the current branch, opt-in branch folders in the workspace tree, a Shift+Tab /plan toggle, drag-and-drop and in-place editing of the message queue, and an Improve prompt button with its own model, thinking switch and thinking effort.",
+  "icon": "./assets/icon.svg",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "widgets",
+    "worktree",
+    "git-branch",
+    "plan-mode",
+    "queue",
+    "prompt",
+    "reasoning-effort"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "README.md",
+    "LICENSE",
+    "assets/icon.svg",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:one": "node --test"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-api-workspace-controller",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-shortcuts"
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ImaginingMaker/dsh-widgets.git"
+  },
+  "homepage": "https://github.com/ImaginingMaker/dsh-widgets#readme",
+  "bugs": {
+    "url": "https://github.com/ImaginingMaker/dsh-widgets/issues"
+  },
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.0-rc.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

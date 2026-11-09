@@ -1,0 +1,8 @@
+# dsh-widgets: one plugin entry, mounted into a DSH profile as a bundle patch.
+#
+# Every widget has its own switch in Settings → Widgets (kept in the browser for client-only widgets and in
+# `storages/dsh-widgets/settings.json` for the ones whose work runs in the Host half). Nothing here opens a port,
+# starts a server or runs a model call on its own.
+- insert:
+    - id: widgets
+      name: dsh-widgets
