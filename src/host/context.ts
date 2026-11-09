@@ -35,6 +35,22 @@ export interface SubprocessService {
 /** The model metadata this plugin reads; the rest of dsh's `LlmResolvedModelInfo` is ignored. */
 export interface ResolvedModelInfo {
   readonly reasoning?: { readonly efforts?: readonly unknown[]; readonly defaultEffort?: unknown };
+  /** What the model can take. An unknown value is treated as "not known", never as "no images". */
+  readonly inputModalities?: readonly string[];
+}
+
+/** One image dsh admitted for a prompt: the reference its adapters read, in place of raw bytes. */
+export interface AdmittedImage {
+  readonly type: 'image';
+  readonly attachment: { readonly attachmentId: string; readonly mediaType: string };
+}
+
+/** The content block the model turns read. */
+export type PromptBlock = { readonly type: 'text'; readonly text: string } | AdmittedImage;
+
+/** The attachment service, reduced to the one call this plugin makes. */
+export interface AttachmentService {
+  admitPromptContent?(images: readonly { readonly type: 'image'; readonly mediaType: string; readonly data: string; readonly name?: string }[]): Promise<readonly AdmittedImage[]>;
 }
 
 export interface PreparedCall {
@@ -42,7 +58,7 @@ export interface PreparedCall {
   readonly config?: Record<string, unknown>;
   stream(options: {
     readonly system?: string;
-    readonly messages: readonly { readonly role: 'user'; readonly content: readonly { readonly type: 'text'; readonly text: string }[] }[];
+    readonly messages: readonly { readonly role: 'user'; readonly content: readonly PromptBlock[] }[];
     readonly maxTokens?: number;
     readonly signal?: AbortSignal;
   }): AsyncIterable<{ readonly type: string; readonly text?: string; readonly reason?: { readonly kind?: string; readonly failure?: { readonly message?: string } } }>;

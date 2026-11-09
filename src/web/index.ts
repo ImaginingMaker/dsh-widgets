@@ -13,6 +13,7 @@
  */
 import React from 'react';
 import type { BriefView, LanguageSetting } from '../shared/types.js';
+import type { DraftImage } from './slot.js';
 import { translatorFor, resolveLanguage } from './kernel/i18n.js';
 import type { Language } from './kernel/i18n.js';
 import type { Translate } from './kernel/i18n.js';
@@ -99,6 +100,24 @@ function applyInner(ctx: ClientContext): void {
     }
   };
 
+  /**
+   * The composer's staged images, serialized for the wire. dsh keeps the browser objects, so this is the one way a plugin
+   * can see what the user attached; without it an optimisation would only ever read the text.
+   */
+  const serializeAttachments = (sessionId: string) => async (ids: readonly string[]): Promise<readonly DraftImage[]> => {
+    if (ids.length === 0) return [];
+    const conversation = read(() => {
+      const scope = ctx.sessions?.scope(sessionId) as { get?(name: string): unknown } | undefined;
+      return scope?.get?.('conversation') as { serializeDraftAttachments?(values: readonly string[]): Promise<{ attachments: readonly unknown[] }> } | undefined;
+    });
+    if (conversation?.serializeDraftAttachments === undefined) return [];
+    const { attachments } = await conversation.serializeDraftAttachments(ids);
+    return (attachments ?? []).filter((part): part is DraftImage => {
+      const value = part as { type?: unknown; mediaType?: unknown; data?: unknown };
+      return value.type === 'image' && typeof value.mediaType === 'string' && typeof value.data === 'string';
+    });
+  };
+
   const panels: Panel[] = [
     {
       id: 'planToggle',
@@ -132,7 +151,13 @@ function applyInner(ctx: ClientContext): void {
         name: 'conversation.input.right',
         id: 'widgets-improve',
         order: 997,
-        inject: (sessionId: string) => ({ sessionId, store: settings, notify: notifyFor(ctx, sessionId), t: t() }),
+        inject: (sessionId: string) => ({
+          sessionId,
+          store: settings,
+          serializeAttachments: serializeAttachments(sessionId),
+          notify: notifyFor(ctx, sessionId),
+          t: t(),
+        }),
       }, ImproveButton))],
       off: null,
     },

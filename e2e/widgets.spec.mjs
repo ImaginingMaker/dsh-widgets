@@ -40,14 +40,20 @@ const fake = createServer((req, res) => {
     // A project summary is asked for by the brief prompt; everything else is an ordinary reply.
     // The plugin asks in the language it was pinned to, so the summary request is recognised in either language.
     const wantsSummary = /preparing context for a coding task|准备项目背景/.test(body);
+    // The Improve prompt call is held open for a moment, so the test can see what the composer does while it runs.
+    const wantsRewrite = /You rewrite a developer's rough draft/.test(body);
+    const delay = wantsRewrite ? 1800 : 0;
     const chunk = (delta, finish) => `data: ${JSON.stringify({
       id: 'x', object: 'chat.completion.chunk', created: 1, model: 'demo',
       choices: [{ index: 0, delta, finish_reason: finish ?? null }],
       ...(finish ? { usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } } : {}),
     })}\n\n`;
-    res.writeHead(200, { 'content-type': 'text/event-stream' });
     const text = wantsSummary ? SUMMARY : 'Sure — here is the plan.';
-    res.end(chunk({ role: 'assistant', content: text }) + chunk({}, 'stop') + 'data: [DONE]\n\n');
+    const send = () => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.end(chunk({ role: 'assistant', content: text }) + chunk({}, 'stop') + 'data: [DONE]\n\n');
+    };
+    if (delay === 0) send(); else setTimeout(send, delay);
   });
 });
 await new Promise((resolve) => fake.listen(0, '127.0.0.1', resolve));
@@ -305,12 +311,32 @@ try {
   await page.keyboard.type('改一下登录页');
   bodies.length = 0;
   await wand.click();
+
+  // While the call runs the icon pulses and the composer is closed for business.
+  await page.waitForFunction(
+    () => document.querySelector('[data-dsh-widgets-wand]')?.getAttribute('aria-busy') === 'true',
+    null, { timeout: 10_000 },
+  );
+  const working = await page.evaluate(() => ({
+    pulsing: document.querySelector('[data-dsh-widgets-wand]')?.hasAttribute('data-dsh-widgets-working') ?? false,
+    locked: document.querySelector('[data-composer-seat]')?.hasAttribute('data-dsh-widgets-busy') ?? false,
+  }));
+  assert.equal(working.pulsing, true, 'the wand shows it is working');
+  assert.equal(working.locked, true, 'the composer is locked');
+
+  const typedBefore = (await composer.innerText()).trim();
+  await composer.focus();
+  await page.keyboard.type('XYZ');
+  await pause(250);
+  assert.equal((await composer.innerText()).trim(), typedBefore, 'typing is refused while the call runs');
+
   await page.waitForFunction(
     () => (document.querySelector('[data-composer-input]')?.innerText ?? '').trim() === 'Sure — here is the plan.',
     null, { timeout: 30_000 },
   );
   assert.ok(bodies.length > 0, 'the wand called the model');
-  step('the wand is pressable and rewrites the draft');
+  assert.equal(await page.evaluate(() => document.querySelector('[data-composer-seat]')?.hasAttribute('data-dsh-widgets-busy') ?? false), false, 'the composer is handed back');
+  step('the wand is pressable, pulses and locks the composer, then rewrites the draft');
 
   // 7. The first task opens with the project summary — and the hierarchy it was made from.
   await composer.click();

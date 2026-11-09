@@ -76,8 +76,19 @@ is refused instead. Attachments you keep stay attached; this build does not add 
 
 The magic wand next to the composer rewrites your draft as a clearer prompt: the goal first, numbered steps when there
 are several parts, and the check that should pass. It reads the draft and a short, read-only description of the project
-(its `AGENTS.md`, `README.md` and `package.json`). The rewrite **replaces the draft and is never sent** — read it, edit
-it, then press Enter. **↺** puts the original back in one step.
+(its file hierarchy, plus `AGENTS.md`, `README.md` and `package.json`). The rewrite **replaces the draft and is never
+sent** — read it, edit it, then press Enter. **↺** puts the original back in one step, and disappears once the message is
+sent: there is no draft left to put back.
+
+**Images are part of the draft.** If you staged screenshots in the composer, they travel with the text — the model reads
+the whole of what you put in the box, not just the words. The plugin asks dsh to serialize exactly the attachments the
+composer holds, and dsh's own admission turns them into the references its adapters read. A model that declares it cannot
+take images is refused in words ("pick a vision model in Settings → Widgets, or remove them") instead of quietly
+optimising the text alone.
+
+**While it runs, the composer is locked.** The wand pulses, and the editor is dimmed and stops taking input, so the text
+the model is rewriting cannot change under it. Everything is restored when the call settles, including on failure — and a
+call that hangs is cut off after a minute rather than leaving the box locked for the session.
 
 **The model is yours to choose, once.** Settings → Widgets has a single **Model** setting — **Same as the chat**, or any
 model this Mac has configured — and both Improve prompt and Project brief use it. There is one answer to "which model does
@@ -303,8 +314,15 @@ dsh plugin --profile web add dsh-widgets
 消息保持原有 id 与队列位置。保存时带上你所看到的内容，因此不会覆盖另一台设备同时做的修改——不一致时直接拒绝。
 
 **提示词优化** —— 输入框旁的魔法棒把草稿改写为更清晰的提示词：目标在前，多步骤时用编号，并给出应当通过的检查。
-它读取草稿与项目的一份只读摘要（`AGENTS.md`、`README.md`、`package.json`）。改写结果**只替换草稿、不会发送**，
-读一遍、改一改，再按 Enter；**↺** 一步还原。
+它读取草稿与项目的一份只读摘要（目录层级，加上 `AGENTS.md`、`README.md`、`package.json`）。改写结果
+**只替换草稿、不会发送**，读一遍、改一改，再按 Enter；**↺** 一步还原，消息发出后它自动消失——没有草稿可还原了。
+
+**图片也算草稿的一部分。** 输入框里放进去的截图会跟着文字一起送进模型：它读的是你放进框里的全部内容，不只是
+文字。插件让 dsh 序列化输入框当前持有的附件，再由 dsh 自己的准入机制转成适配器读取的引用。若模型声明不支持
+图片，会被明确拒绝（「请在 设置 → 小组件 里换一个支持图片的模型，或移除图片」），而不是悄悄只优化文字。
+
+**优化期间输入框被锁定。** 魔法棒的图标闪烁，编辑器变灰并停止接受输入，避免模型正在改写的文字被改动。请求结束
+（包括失败）后一切恢复；卡住的请求会在一分钟后中止，不会让输入框一直锁着。
 
 **推理档位来自你自己的模型配置，不是写死的清单。** dsh 的模型配置里每个模型可以声明：
 

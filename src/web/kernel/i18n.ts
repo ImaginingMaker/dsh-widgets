@@ -50,6 +50,8 @@ const DICTIONARY: Record<Language, Record<string, string>> = {
 
     'improve.title': 'Improve prompt',
     'improve.undo': 'Undo improvement',
+    'improve.imagesSkipped': 'The images in the draft could not be read; improving the text alone.',
+    'improve.timeout': 'The optimisation timed out.',
     'improve.failed': 'Could not improve: {error}',
     'improve.empty': 'Type something first',
 
@@ -99,6 +101,8 @@ const DICTIONARY: Record<Language, Record<string, string>> = {
 
     'improve.title': '提示词优化',
     'improve.undo': '撤销优化',
+    'improve.imagesSkipped': '无法读取草稿中的图片，仅按文字优化。',
+    'improve.timeout': '优化超时。',
     'improve.failed': '优化失败：{error}',
     'improve.empty': '请先输入内容',
 

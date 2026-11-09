@@ -71,9 +71,77 @@ const TABLE = {
     models: [
       { id: 'with-effort', name: 'With effort', reasoning: { efforts: [{ id: 'off' }, { id: 'low' }, { id: 'high' }], defaultEffort: 'low' } },
       { id: 'no-effort', name: 'No effort' },
+      { id: 'sees', name: 'Sees images', inputModalities: ['text', 'image'] },
+      { id: 'text-only', name: 'Text only', inputModalities: ['text'] },
     ],
   },
 };
+
+// ---- images travel with the text -----------------------------------------------------------------------------------------
+{
+  const home = tempDir();
+  const llm = makeLlm(TABLE, { preparers: () => 'Rewritten with the screenshot in mind.' });
+  const admitted = [];
+  const attachments = {
+    admitPromptContent: async (images) => {
+      admitted.push(...images);
+      return images.map((image, index) => ({
+        type: 'image',
+        attachment: { attachmentId: `att-${index}`, mediaType: image.mediaType, bytes: 1, width: 2, height: 2 },
+      }));
+    },
+  };
+  const { ctx, routes } = makeCtx({ services: { llm, attachments } });
+  installImprove({ ...ctx }, home.dir);
+
+  const png = Buffer.from('fake-png').toString('base64');
+  const withImage = await call(routes, IMPROVE_PATH, {
+    method: 'POST',
+    body: { sessionId: 's1', text: 'make it look like this', provider: 'local', model: 'sees', attachments: [{ type: 'image', mediaType: 'image/png', data: png, name: 'shot.png' }] },
+  });
+  assert.equal(withImage.status, 200, JSON.stringify(withImage.json));
+  assert.equal(admitted.length, 1, 'the image went through dsh\'s own admission');
+  assert.equal(admitted[0].mediaType, 'image/png');
+  const content = llm.streams.at(-1).messages[0].content;
+  assert.equal(content[0].type, 'text', 'the instruction comes first');
+  assert.match(content[0].text, /1 image/, 'the prompt tells the model it carries an image');
+  assert.equal(content[1].type, 'image');
+  assert.equal(content[1].attachment.attachmentId, 'att-0', 'the admitted reference is what the adapter reads');
+
+  // A model that cannot take images is refused in words — never a silent text-only optimisation.
+  const blind = await call(routes, IMPROVE_PATH, {
+    method: 'POST',
+    body: { sessionId: 's2', text: 'x', provider: 'local', model: 'text-only', attachments: [{ type: 'image', mediaType: 'image/png', data: png }] },
+  });
+  assert.equal(blind.status, 409);
+  assert.match(blind.json.error, /does not take images/);
+
+  // No images, no admission, and a prompt that does not mention them.
+  const textOnly = await call(routes, IMPROVE_PATH, { method: 'POST', body: { sessionId: 's3', text: 'x', provider: 'local', model: 'sees' } });
+  assert.equal(textOnly.status, 200);
+  assert.equal(llm.streams.at(-1).messages[0].content.length, 1);
+  assert.equal(/image/.test(llm.streams.at(-1).messages[0].content[0].text), false);
+
+  // Shapes that are not images are refused before any model call.
+  for (const attachmentsBody of [
+    'nope',
+    [{ type: 'file', mediaType: 'image/png', data: png }],
+    [{ type: 'image', mediaType: 'image/tiff', data: png }],
+    [{ type: 'image', mediaType: 'image/png', data: '' }],
+    Array.from({ length: 9 }, () => ({ type: 'image', mediaType: 'image/png', data: png })),
+  ]) {
+    const bad = await call(routes, IMPROVE_PATH, { method: 'POST', body: { sessionId: 's4', text: 'x', provider: 'local', model: 'sees', attachments: attachmentsBody } });
+    assert.equal(bad.status, 400, JSON.stringify(attachmentsBody).slice(0, 60));
+  }
+
+  // A dsh without the attachment service says so instead of quietly dropping the image.
+  const { ctx: bare, routes: bareRoutes } = makeCtx({ services: { llm } });
+  installImprove({ ...bare }, home.dir);
+  const missing = await call(bareRoutes, IMPROVE_PATH, { method: 'POST', body: { sessionId: 's5', text: 'x', provider: 'local', model: 'sees', attachments: [{ type: 'image', mediaType: 'image/png', data: png }] } });
+  assert.equal(missing.status, 409);
+  assert.match(missing.json.error, /cannot send images/);
+  home.cleanup();
+}
 
 // A successful call: the model gets the draft, and the answer is the draft's replacement.
 {

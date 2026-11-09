@@ -33,8 +33,13 @@ const resetHooks = () => { hooks = []; hookIndex = 0; effects = []; };
 const runEffects = async () => {
   const pending = effects;
   effects = [];
-  for (const effect of pending) effect();
+  const cleanups = [];
+  for (const effect of pending) {
+    const cleanup = effect();
+    if (typeof cleanup === 'function') cleanups.push(cleanup);
+  }
   await new Promise((resolve) => setTimeout(resolve, 0));
+  return cleanups;
 };
 
 // ---- tree helpers ------------------------------------------------------------------------------------------------------
@@ -145,9 +150,10 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   const drafts = [];
   const notices = [];
   const storeOf = (analysis) => ({ getSnapshot: () => ({ analysis }) });
+  let state = { draft: 'make login work', attachmentIds: [] };
   const base = {
-    sessionId: 's1', useInput: (read) => read({ draft: 'make login work' }), inputActions: { setDraft: (text) => drafts.push(text) },
-    chatProvider: 'local', chatModel: 'with-effort', store: storeOf({ model: null, effort: null }),
+    sessionId: 's1', useInput: (read) => read(state), inputActions: { setDraft: (text) => drafts.push(text) },
+    store: storeOf({ model: null, effort: null }),
     notify: (level, text) => notices.push([level, text]), t: (key) => key,
   };
 
@@ -179,6 +185,76 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   assert.equal(withProp(tree, 'data-dsh-widgets-wand')[0].props.className, 'dw-btn');
   // A wand with no chat model in reach is still a wand you can press.
   assert.equal(withProp(tree, 'data-dsh-widgets-wand')[0].props.disabled, false);
+
+  // ---- the undo belongs to a draft, not to a sent message ---------------------------------------------------------
+  {
+    state = { draft: 'make login work', attachmentIds: [] };
+    answer = () => ({ value: { text: 'Make the login form work.' } });
+    resetHooks();
+    tree = entry.Component(base);
+    await withProp(tree, 'data-dsh-widgets-wand')[0].props.onClick();
+    hookIndex = 0;
+    tree = entry.Component(base);
+    assert.equal(withProp(tree, 'data-dsh-widgets-undo-draft').length, 1, 'an undo appears beside the wand');
+
+    // The message is sent: the composer empties.
+    state = { draft: '', attachmentIds: [] };
+    hookIndex = 0;
+    tree = entry.Component(base);
+    await runEffects();
+    hookIndex = 0;
+    tree = entry.Component(base);
+    assert.equal(withProp(tree, 'data-dsh-widgets-undo-draft').length, 0, 'a sent message leaves no undo behind');
+  }
+
+  // ---- a call in flight: the icon says so, the composer is locked, the images travel ---------------------------------
+  {
+    state = { draft: 'match this screenshot', attachmentIds: ['a1'] };
+    let release;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url, method: init?.method ?? 'GET', body: init?.body === undefined ? undefined : JSON.parse(init.body) });
+      await new Promise((resolve) => { release = resolve; });
+      return { ok: true, status: 200, json: async () => ({ text: 'Rewritten.' }) };
+    };
+    const serialized = [];
+    let seatAttribute = null;
+    const seat = { setAttribute: (name, value) => { seatAttribute = [name, value]; }, removeAttribute: () => { seatAttribute = null; }, addEventListener: () => {}, removeEventListener: () => {} };
+    const realDocument = globalThis.document;
+    globalThis.document = { ...realDocument, querySelector: () => seat };
+
+    resetHooks(); requests = [];
+    tree = entry.Component({
+      ...base,
+      serializeAttachments: async (ids) => { serialized.push(...ids); return [{ type: 'image', mediaType: 'image/png', data: 'AAAA' }]; },
+    });
+    const pending = withProp(tree, 'data-dsh-widgets-wand')[0].props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    hookIndex = 0;
+    tree = entry.Component(base);
+    const cleanups = await runEffects();
+    hookIndex = 0;
+    tree = entry.Component(base);
+    const running = withProp(tree, 'data-dsh-widgets-wand')[0];
+    assert.equal(running.props['aria-busy'], true, 'the icon reports that it is working');
+    assert.equal(running.props['data-dsh-widgets-working'], '', 'and carries the pulse');
+    assert.equal(running.props.disabled, true, 'a second press cannot start a second call');
+    assert.deepEqual(seatAttribute, ['data-dsh-widgets-busy', ''], 'the composer is marked as locked');
+    assert.deepEqual(serialized, ['a1'], 'the staged image was serialized');
+    assert.deepEqual(requests.at(-1).body.attachments, [{ type: 'image', mediaType: 'image/png', data: 'AAAA' }]);
+
+    release();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // React runs the previous cleanup when the effect's dependency changes; the fake runtime is told to do the same.
+    for (const cleanup of cleanups) cleanup();
+    hookIndex = 0;
+    tree = entry.Component(base);
+    assert.equal(withProp(tree, 'data-dsh-widgets-wand')[0].props['aria-busy'], false, 'the icon stops when the call settles');
+    assert.equal(seatAttribute, null, 'and the composer is handed back');
+    globalThis.document = realDocument;
+    globalThis.fetch = realFetch;
+  }
   answer = () => ({ ok: true, value: {} });
 }
 

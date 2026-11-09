@@ -122,11 +122,16 @@ export const improveInputOk = (text: unknown): text is string =>
   typeof text === 'string' && text.trim() !== '' && text.length <= IMPROVE_INPUT_MAX;
 
 /** The Improve prompt request: the draft first, then what the project is, then the shape the answer must have. */
-export function improvePromptText(draft: string, brief: string): string {
+export function improvePromptText(draft: string, brief: string, imageCount = 0): string {
   return [
     'You rewrite a developer\'s rough draft into a clearer prompt for a coding agent.',
     'Keep the writer\'s language and intent. Never invent file names, commands or facts that the draft and the project',
     'description do not support. Return only the rewritten prompt, with no preamble and no quotation marks.',
+    ...(imageCount === 0 ? [] : [
+      '',
+      `The draft carries ${imageCount} image${imageCount === 1 ? '' : 's'} after this text. Read ${imageCount === 1 ? 'it' : 'them'} as part of`,
+      'the draft: describe what they ask for, do not transcribe them.',
+    ]),
     '',
     '<draft>',
     draft,

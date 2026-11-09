@@ -7,7 +7,20 @@ import type { Translate } from './kernel/i18n.js';
 export type UseStore = <T>(selector: (state: T) => unknown) => any;
 
 export interface InputState {
+  /** The editor's clipboard-text projection: what the user typed, with chips expanded. */
   readonly draft: string;
+  /** Runtime-only ids of the images and files staged in the composer; dsh keeps the browser objects itself. */
+  readonly attachmentIds?: readonly string[];
+  /** The submit plane. `plain` is the only phase in which the composer accepts new input. */
+  readonly phase?: string;
+}
+
+/** One image the composer staged, serialized for the wire: base64 bytes and the media type dsh accepted. */
+export interface DraftImage {
+  readonly type: 'image';
+  readonly mediaType: string;
+  readonly data: string;
+  readonly name?: string;
 }
 
 export interface InputActions {
@@ -27,7 +40,7 @@ export interface SlotBase {
 }
 
 export interface ComposerProps extends SlotBase {
-  readonly useInput: (selector: (state: InputState | undefined) => string) => string;
+  readonly useInput: <T>(selector: (state: InputState | undefined) => T) => T;
   readonly inputActions?: InputActions;
   readonly useProjection?: (name: string) => { readonly active?: boolean; readonly pending?: boolean } | undefined;
   readonly sessionId?: string;

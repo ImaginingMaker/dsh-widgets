@@ -72,8 +72,10 @@ export function tempDir(prefix = 'dsh-widgets-') {
 /** A real git repository with one commit on `main`, plus a helper to add a second commit. */
 export function makeLlm(table, { preparers } = {}) {
   const calls = [];
+  const streams = [];
   return {
     calls,
+    streams,
     listProviders: () => Object.keys(table).map((id) => ({ id, name: id })),
     listModels: async (provider) => (table[provider]?.models ?? []).map((model) => ({ provider, id: model.id, name: model.name ?? model.id })),
     resolveModelInfo: async (provider, model) => {
@@ -82,6 +84,7 @@ export function makeLlm(table, { preparers } = {}) {
       return {
         provider, id: model, name: entry.name ?? model,
         ...(entry.reasoning === undefined ? {} : { reasoning: entry.reasoning }),
+        ...(entry.inputModalities === undefined ? {} : { inputModalities: entry.inputModalities }),
       };
     },
     prepareCall: async (config) => {
@@ -89,6 +92,7 @@ export function makeLlm(table, { preparers } = {}) {
       return {
         config,
         stream(options) {
+          streams.push(options);
           const text = preparers?.(config, options) ?? 'rewritten';
           return (async function* generate() {
             yield { type: 'text-delta', index: 0, text };
