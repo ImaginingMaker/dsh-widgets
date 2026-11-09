@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { briefSignature } from '../shared/brief.js';
+import { briefSignature, textHash } from '../shared/brief.js';
 import type { BriefStatus } from '../shared/types.js';
 import type { SubprocessService } from './context.js';
-import { projectBrief, projectListing } from './files.js';
+import { projectBrief, projectTree } from './files.js';
 import { runGit } from './git.js';
 
 export interface BriefRecord {
@@ -13,6 +13,8 @@ export interface BriefRecord {
   readonly signature?: string;
   readonly at?: number;
   readonly model?: string;
+  /** The file hierarchy the summary was made from; it travels into the chat beside the summary. */
+  readonly tree?: string;
 }
 
 interface BriefFile {
@@ -78,15 +80,17 @@ export function briefStore(file: string) {
   };
 }
 
-/** The fingerprint of what a summary was made from: the commit plus the three readable files' size and mtime. */
+/**
+ * The fingerprint of what a summary was made from: the commit, the shape of the project, and the three usual documents'
+ * size and mtime. The tree is part of it because the tree is what the summary was actually made from — adding or removing
+ * a file invalidates the summary, which is the point.
+ */
 export async function signatureOf(subprocess: SubprocessService, dir: string): Promise<string> {
   let head: string | undefined;
   try {
     const result = await runGit(subprocess, dir, ['rev-parse', 'HEAD']);
     if (result.code === 0) head = result.stdout.trim();
   } catch { /* not a repository: the files alone decide */ }
-  // A project with no document of its own is summarised from its listing, so the listing is part of what the summary was
-  // made from: a new folder in such a project invalidates the old summary instead of reusing it for ever.
   const files = chunks.flatMap((name) => {
     try {
       const path = join(dir, name);
@@ -97,15 +101,17 @@ export async function signatureOf(subprocess: SubprocessService, dir: string): P
       return [];
     }
   });
-  if (files.length === 0) {
-    const listing = projectListing(dir);
-    return `${briefSignature({ head, files })}@${listing.join(',')}`;
-  }
-  return briefSignature({ head, files });
+  return `${briefSignature({ head, files })}@${textHash(projectTree(dir).join('\n'))}`;
 }
 
-/** The material one analysis reads: the same files the Improve prompt already trusts. */
-export const briefMaterial = (dir: string): string => projectBrief(dir);
+/**
+ * The material one analysis reads: the project's file hierarchy, plus whatever its usual documents say. The tree is kept
+ * separately as well, because it is injected into the chat next to the summary.
+ */
+export const briefMaterial = (dir: string): { text: string; tree: string } => ({
+  text: projectBrief(dir),
+  tree: projectTree(dir).join('\n'),
+});
 
 export interface BriefJob {
   readonly path: string;
@@ -119,7 +125,7 @@ export interface BriefJob {
 export function briefRunner(deps: {
   readonly store: ReturnType<typeof briefStore>;
   readonly signatureOf: (dir: string) => Promise<string>;
-  readonly material: (dir: string) => string;
+  readonly material: (dir: string) => { readonly text: string; readonly tree: string };
   readonly complete: (prompt: string, signal: AbortSignal) => Promise<{ text: string; model: string }>;
   readonly timeoutMs?: number;
 }) {
@@ -131,16 +137,16 @@ export function briefRunner(deps: {
     if (!force && existing !== undefined && existing.status === 'ready' && existing.signature === signature) return existing;
 
     const material = deps.material(dir);
-    if (material.trim() === '') {
+    if (material.text.trim() === '') {
       // An empty folder is not a failure to report: there is simply nothing to summarise, and nothing to inject.
       return { status: 'idle', signature, at: Date.now() };
     }
 
     const timeout = AbortSignal.timeout(deps.timeoutMs ?? BRIEF_TIMEOUT_MS);
     try {
-      const { text, model } = await deps.complete(material, timeout);
+      const { text, model } = await deps.complete(material.text, timeout);
       if (text.trim() === '') throw new Error('the model gave no text');
-      const record: BriefRecord = { status: 'ready', text, signature, at: Date.now(), model };
+      const record: BriefRecord = { status: 'ready', text, tree: material.tree, signature, at: Date.now(), model };
       await deps.store.set(dir, record);
       return record;
     } catch (error) {

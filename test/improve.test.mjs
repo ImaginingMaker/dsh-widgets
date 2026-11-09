@@ -53,11 +53,15 @@ try {
   symlinkSync(fifo, join(project, 'package.json'));
   assert.equal(readInside(project, 'package.json'), undefined);
 
-  // The brief is the three files it knows, and only the readable ones.
+  // The brief is the project's hierarchy, plus the documents it knows and could read.
   rmSync(join(project, 'AGENTS.md'));
   rmSync(join(project, 'package.json'));
   writeFileSync(join(project, 'AGENTS.md'), 'rules\n');
-  assert.equal(projectBrief(project), '<AGENTS.md>\nrules\n</AGENTS.md>\n\n<README.md>\n# app\nsecond line\n</README.md>');
+  const briefOfProject = projectBrief(project);
+  assert.match(briefOfProject, /^<tree>\n/);
+  assert.match(briefOfProject, /^AGENTS\.md$/m, 'the hierarchy names it');
+  assert.match(briefOfProject, /<AGENTS\.md>\nrules\n<\/AGENTS\.md>/);
+  assert.match(briefOfProject, /<README\.md>\n# app\nsecond line\n<\/README\.md>/);
   assert.equal(projectBrief(join(dir, 'nowhere')), '');
 } finally { cleanup(); }
 

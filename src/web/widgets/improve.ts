@@ -28,22 +28,20 @@ export interface ImproveButtonProps extends ComposerProps {
   readonly inputActions?: InputActions;
   /** The live settings store: the model and effort are read at click time, not at mount time. */
   readonly store?: { getSnapshot(): SettingsView };
-  readonly chatProvider?: string;
-  readonly chatModel?: string;
 }
 
 /**
  * One model call rewrites the draft, which is replaced but never sent. The model comes from the plugin's single analysis
  * setting — read when the wand is pressed, so a choice made since the chat opened still applies.
  */
-export function ImproveButton({ sessionId, useInput, inputActions, store, chatProvider, chatModel, notify, t }: ImproveButtonProps): React.ReactElement {
+export function ImproveButton({ sessionId, useInput, inputActions, store, notify, t }: ImproveButtonProps): React.ReactElement {
   const draft = useInput((state) => (state === undefined ? '' : state.draft));
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | undefined>(undefined);
   const [undone, setUndone] = React.useState<string | undefined>(undefined);
 
-  const live = React.useRef({ draft, chatProvider, chatModel });
-  live.current = { draft, chatProvider, chatModel };
+  const live = React.useRef({ draft });
+  live.current = { draft };
 
   const run = async (): Promise<void> => {
     if (busy) return;
@@ -57,8 +55,9 @@ export function ImproveButton({ sessionId, useInput, inputActions, store, chatPr
       const body: Record<string, unknown> = {
         sessionId,
         text: current.draft,
-        provider: chosen?.provider ?? current.chatProvider,
-        model: chosen?.model ?? current.chatModel,
+        // Only a model pinned for this plugin travels; "same as the chat" is resolved by the Host, which can see it.
+        provider: chosen?.provider,
+        model: chosen?.model,
       };
       const effort = settings?.analysis?.effort;
       if (effort !== null && effort !== undefined) body.effort = effort;
@@ -82,7 +81,9 @@ export function ImproveButton({ sessionId, useInput, inputActions, store, chatPr
       'aria-label': t('improve.title'),
       'aria-busy': busy,
       'data-dsh-widgets-wand': '',
-      disabled: busy || chatProvider === undefined || chatModel === undefined,
+      // A dead button is worse than a failed request: if no model can be resolved the Host says so, in words, when the
+      // user clicks. Nothing here may depend on the client being able to see the chat's model.
+      disabled: busy,
       onClick: run,
     }, React.createElement(SparkleIcon)),
     undone === undefined ? null : React.createElement('button', {

@@ -63,14 +63,6 @@ export const name = 'dsh-widgets';
  */
 export const inject = ['slots', 'locale'];
 
-/** The chat's own model, for a chat that has not picked one in Settings. */
-function chatModelOf(ctx: ClientContext, sessionId: string): { provider?: string; model?: string } {
-  return read(() => {
-    const scope = ctx.sessions?.scope(sessionId) as { get(name: string): { selection?: { getSnapshot(): { current?: { provider?: string; model?: string } } } } } | undefined;
-    return scope?.get('conversation')?.selection?.getSnapshot().current;
-  }) ?? {};
-}
-
 const notifyFor = (ctx: ClientContext, sessionId: string) => (level: 'info' | 'warn' | 'error', text: string): void => {
   try {
     const scope = read(() => ctx.sessions?.scope(sessionId));
@@ -146,17 +138,7 @@ function applyInner(ctx: ClientContext): void {
         name: 'conversation.input.right',
         id: 'widgets-improve',
         order: 997,
-        inject: (sessionId: string) => {
-          const chat = chatModelOf(ctx, sessionId);
-          return {
-            sessionId,
-            store: settings,
-            chatProvider: chat.provider,
-            chatModel: chat.model,
-            notify: notifyFor(ctx, sessionId),
-            t: t(),
-          };
-        },
+        inject: (sessionId: string) => ({ sessionId, store: settings, notify: notifyFor(ctx, sessionId), t: t() }),
       }, ImproveButton))],
       off: null,
     },

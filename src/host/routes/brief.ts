@@ -2,7 +2,7 @@ import { BRIEF_PATH } from '../../shared/routes.js';
 import { clipBrief, briefPrompt } from '../../shared/brief.js';
 import type { BriefView, ModelRoute } from '../../shared/types.js';
 import { callControls } from '../../shared/reasoning.js';
-import type { HostContext, LlmService } from '../context.js';
+import type { Agent, HostContext, LlmService } from '../context.js';
 import { json, service } from '../context.js';
 import { briefRunner, briefStore, briefMaterial, signatureOf } from '../briefStore.js';
 import type { BriefRecord } from '../briefStore.js';
@@ -14,10 +14,29 @@ export const BRIEF_MAX_TOKENS = 1600;
 const isText = (value: unknown, max = 4096): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max;
 
-/** The route a model call uses: the shared analysis model, else dsh's own default. */
-export function analysisRoute(ctx: HostContext, home: string): ModelRoute | undefined {
+/** The model one chat is currently set to, read from the Host because the client cannot see it. */
+export function sessionRoute(ctx: HostContext, agent: Agent | undefined): ModelRoute | undefined {
+  if (agent === undefined) return undefined;
+  const selection = (() => {
+    try { return ctx.sessionController?.agents?.selectionFor?.(agent)?.current; } catch { return undefined; }
+  })();
+  return isText(selection?.provider, 200) && isText(selection?.model, 200)
+    ? { provider: selection.provider, model: selection.model }
+    : undefined;
+}
+
+/**
+ * The route a model call uses, in the order that respects what the user chose:
+ *
+ * 1. the model picked for this plugin in Settings;
+ * 2. "same as the chat" — the model the chat itself is set to;
+ * 3. dsh's own default model.
+ */
+export function analysisRoute(ctx: HostContext, home: string, agent?: Agent): ModelRoute | undefined {
   const fromSettings = sharedStore(settingsFileOf(home)).read().analysis.model;
   if (fromSettings !== null) return fromSettings;
+  const fromSession = sessionRoute(ctx, agent);
+  if (fromSession !== undefined) return fromSession;
   const defaults = service<{ currentSelection(): { provider?: string; model?: string } }>(ctx, 'agentDefaultModel');
   const selection = (() => { try { return defaults?.currentSelection(); } catch { return undefined; } })();
   return isText(selection?.provider, 200) && isText(selection?.model, 200)

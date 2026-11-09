@@ -131,6 +131,11 @@ it, then press Enter. **↺** puts the original back in one step.
 model this Mac has configured — and both Improve prompt and Project brief use it. There is one answer to "which model does
 this plugin call".
 
+**"Same as the chat" really means the chat.** The client cannot see which model a conversation is set to, so it sends no
+route at all and the Host resolves it in this order: the model pinned here, then the chat's own model, then dsh's default.
+The wand is therefore never greyed out for want of a model it could not see; if nothing can be resolved, the click reports
+why.
+
 **The reasoning ladder comes from your own model configuration — not from a fixed list.** dsh's model configuration
 declares, per model:
 
@@ -158,16 +163,20 @@ composer.
 
 **Off by default.** Switch it on and the first task in a project opens with a short summary of that project.
 
-One quiet model call reads the same three files the plugin already trusts — `AGENTS.md`, `README.md`, `package.json` —
-and, for a folder that documents nothing at its own root (a workspace of repositories, say), a plain listing of what is
-there. It writes at most **500 characters**: what the project is and its stack, how to run it and its tests, what those files
-require of someone making changes, and the traps to avoid. The summary becomes the first thing the task is told.
+One quiet model call is given the project's **file hierarchy, three levels deep**, plus any `AGENTS.md`, `README.md` and
+`package.json` it finds. The plugin states no opinion about what makes a project analysable — a folder of repositories, a
+project with no README, a single file: the hierarchy is the material, and the model draws the conclusion. It writes at
+most **500 characters**: what the project is and its stack, how to run it and its tests, what it expects of someone making
+changes, and the traps to avoid.
+
+The task that follows is told **both** — the summary and the hierarchy it was made from — because a short description loses
+what the agent needs most (where the code lives, which units exist) and the tree costs a fraction of rediscovering it.
 
 - **It never waits.** A read in flight is not waited for: if you send before it finishes, the task simply goes without the
   summary. A read that fails is skipped the same way.
-- **One read per project**, keyed by its real path and a fingerprint of `HEAD` plus the files' size and mtime. A summary
-  made from an older state of the project is rebuilt on the next task; an unchanged one is reused, so the model is not
-  called again.
+- **One read per project**, keyed by its real path and a fingerprint of `HEAD`, the hierarchy and the documents' size and
+  mtime. A summary made from an older shape of the project is rebuilt on the next task; an unchanged one is reused, so the
+  model is not called again.
 - **The composer shows it**: a spinner while reading, a dot when ready (its tooltip is the summary), and a warning dot
   when it failed — its tooltip carries the reason, and a click tries again. Nothing is written into the composer, and a
   folder with nothing in it shows nothing at all. Switching the widget off removes the icon and stops every read.

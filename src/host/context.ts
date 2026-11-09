@@ -111,6 +111,8 @@ export interface HostContext {
   readonly subprocess: SubprocessService;
   readonly sessionController?: {
     resolveAgent(sessionId: string): Promise<{ readonly agent: Agent } | { readonly error: unknown }>;
+    /** The model a session is currently set to. Reading it here is what makes "same as the chat" mean the chat. */
+    readonly agents?: { selectionFor?(agent: Agent): { readonly current?: { readonly provider?: string; readonly model?: string } } | undefined };
   };
   readonly sessions?: { readonly list?: { getSnapshot(): { readonly byId?: Record<string, { readonly cwd?: string }> } } };
   readonly timer?: { interval(callback: () => void, delay: number): () => void };

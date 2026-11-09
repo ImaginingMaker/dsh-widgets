@@ -1,4 +1,4 @@
-import { noteMessage, hasNote } from './notes.js';
+import { noteMessage, hasNote, briefNote } from './notes.js';
 import type { BriefRecord } from './briefStore.js';
 import { briefSignature } from '../shared/brief.js';
 import { targetNote } from '../shared/targetNote.js';
@@ -82,9 +82,8 @@ export async function prepareChat(
     // Only a summary that was made from the project as it is now, and that is finished, may open the chat. A read still in
     // flight is never waited for: the task starts either way.
     if (record !== undefined && record.status === 'ready' && record.text !== undefined && record.text !== '' && record.signature === signature) {
-      notes.push(deps.language() === 'zh'
-        ? `本项目的背景（由插件在任务开始前整理，供你参考）：\n\n${record.text}`
-        : `Background on this project (gathered by a plugin before the task started):\n\n${record.text}`);
+      // The summary and the hierarchy it was made from travel together.
+      notes.push(briefNote(record.text, record.tree, deps.language()));
     }
   }
 

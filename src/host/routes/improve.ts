@@ -68,10 +68,13 @@ export function installImprove(ctx: HostContext, home: string): void {
 
       try {
         const settings = store.read();
-        // The chat may name its own route (it follows the chat's model); otherwise the shared analysis model decides.
+        // An explicit route wins; otherwise the shared setting, the chat's own model, then dsh's default — the order
+        // `analysisRoute` documents. The client sends a route only when the user pinned a model for this plugin.
+        const found = await ctx.sessionController?.resolveAgent(sessionId).catch(() => undefined);
+        const agent = found === undefined || !('agent' in found) ? undefined : found.agent;
         const route = (isText(body.provider, 200) && isText(body.model, 200))
           ? { provider: body.provider, model: body.model }
-          : analysisRoute(ctx, home);
+          : analysisRoute(ctx, home, agent);
         if (route === undefined) return json({ error: 'no model is configured for this plugin' }, 409);
 
         const info = await llm.resolveModelInfo?.(route.provider, route.model, signal);

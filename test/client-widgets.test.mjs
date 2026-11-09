@@ -248,7 +248,8 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   resetHooks(); requests = [];
   let tree = entry.Component({ ...base, store: storeOf({ model: null, effort: 'high' }) });
   await withProp(tree, 'data-dsh-widgets-wand')[0].props.onClick();
-  assert.deepEqual(lastRequest().body, { sessionId: 's1', text: 'make login work', provider: 'local', model: 'with-effort', effort: 'high' });
+  // "Same as the chat" sends no route at all: the Host resolves it, because only the Host can see the chat's model.
+  assert.deepEqual(lastRequest().body, { sessionId: 's1', text: 'make login work', effort: 'high' });
   assert.deepEqual(drafts, ['Make the login form work end to end.']);
 
   // A model chosen in Settings after the chat opened is the one used.
@@ -269,6 +270,8 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
 
   // The icon carries no class that could draw a box: the shared stylesheet owns its look.
   assert.equal(withProp(tree, 'data-dsh-widgets-wand')[0].props.className, 'dw-btn');
+  // A wand with no chat model in reach is still a wand you can press.
+  assert.equal(withProp(tree, 'data-dsh-widgets-wand')[0].props.disabled, false);
   answer = () => ({ ok: true, value: {} });
 }
 

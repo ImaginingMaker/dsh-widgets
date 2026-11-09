@@ -278,19 +278,39 @@ try {
   );
   step('the project brief is read in the background and reports itself ready');
 
-  // 7. The first task opens with the project summary.
+  // 7. The wand works: not disabled, and pressing it really rewrites the draft through the model.
   const composer = page.locator('[data-composer-input]').first();
   await composer.waitFor({ state: 'visible', timeout: 20_000 });
   await composer.click();
+  assert.equal(await wand.isDisabled(), false, 'the wand is pressable even before the chat has a model of its own');
+  await page.keyboard.type('改一下登录页');
+  bodies.length = 0;
+  await wand.click();
+  await page.waitForFunction(
+    () => (document.querySelector('[data-composer-input]')?.innerText ?? '').trim() === 'Sure — here is the plan.',
+    null, { timeout: 30_000 },
+  );
+  assert.ok(bodies.length > 0, 'the wand called the model');
+  step('the wand is pressable and rewrites the draft');
+
+  // 8. The first task opens with the project summary — and the hierarchy it was made from.
+  await composer.click();
+  await page.keyboard.press('Meta+A');
+  await page.keyboard.press('Backspace');
+  await pause(300);
   bodies.length = 0;
   await page.keyboard.type('把测试跑一遍');
   await page.keyboard.press('Enter');
   await pause(6000);
   assert.ok(bodies.length > 0, 'the model was called');
+  const first = bodies.join('\n');
   assert.ok(bodies.some((body) => body.includes('acme-web is a small demo app')), 'the first task opens with the project summary');
-  step('the first task in the project opens with the summary, as a prompt');
+  // The note carries the hierarchy too, not only the conclusion.
+  assert.match(first, /<目录结构>|<file hierarchy>/, 'the note carries the file hierarchy');
+  assert.match(first, /README\.md/, 'the hierarchy names the project files');
+  step('the first task opens with the summary plus the file hierarchy, as a prompt');
 
-  // 8. In a chat that now exists, Shift+Tab turns plan mode on through dsh's own command: the draft stays empty, and the
+  // 9. In a chat that now exists, Shift+Tab turns plan mode on through dsh's own command: the draft stays empty, and the
   //    next request carries the policy dsh attaches to a plan-mode turn.
   await composer.click();
   await page.keyboard.press('Shift+Tab');
@@ -306,7 +326,7 @@ try {
   assert.match(second, /exit_plan_mode|plan mode/i, `the next request carries dsh's plan-mode policy (${second.slice(0, 160)})`);
   step('Shift+Tab turns plan mode on through dsh\'s own command: the next request carries the policy, the draft stays empty');
 
-  // 8. Once the chat has started the target is a read-only marker rather than a picker.
+  // 10. Once the chat has started the target is a read-only marker rather than a picker.
   await pause(500);
   const markers = page.locator('[data-dsh-widgets-target]');
   const tagNames = await markers.evaluateAll((nodes) => nodes.map((node) => `${node.tagName.toLowerCase()}:${node.getAttribute('data-readonly')}`));
