@@ -23,7 +23,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      # The branch and worktree tests run real git in a temporary repository.
+      # Some tests run real git in a temporary repository, to fingerprint a project.
       - name: git identity for the test repositories
         run: |
           git config --global user.email ci@example.com

@@ -45,7 +45,7 @@ assert.equal(typeof ensureStyles(undefined), 'function');
 ensureStyles(undefined)();
 
 // The classes the widgets rely on live here, not in whichever component happens to render.
-for (const selector of ['.dw-btn', '.dw-chip', '.dw-panel', '.dw-field', '.dw-queue', '.dw-brief']) {
+for (const selector of ['.dw-btn', '.dw-action', '.dw-panel', '.dw-field', '.dw-queue', '.dw-brief']) {
   assert.ok(WIDGETS_CSS.includes(selector), `${selector} is defined once`);
 }
 assert.match(WIDGETS_CSS, /\.dw-btn\s*\{[^}]*border:\s*0/, 'a composer button has no border of its own');

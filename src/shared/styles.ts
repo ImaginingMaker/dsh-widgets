@@ -26,27 +26,6 @@ export const WIDGETS_CSS = `
 .dw-btn:disabled { opacity: .4; cursor: default; }
 .dw-btn[aria-expanded="true"] { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); opacity: 1; }
 
-.dw-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  max-width: 220px;
-  padding: 3px 7px;
-  border: 0;
-  border-radius: var(--dsw-radius-sm, 6px);
-  background: none;
-  color: var(--dsw-alias-label-secondary, inherit);
-  font: inherit;
-  font-size: 13px;
-  line-height: 18px;
-  cursor: pointer;
-}
-.dw-chip:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
-.dw-chip:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3b6cf6); outline-offset: 1px; }
-.dw-chip[data-readonly="true"] { cursor: default; }
-.dw-chip[data-readonly="true"]:hover { background: none; }
-.dw-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
 .dw-panel {
   position: absolute;
   z-index: 40;
@@ -125,7 +104,7 @@ export const WIDGETS_CSS = `
 @keyframes dw-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   .dw-brief-spin { animation: none; }
-  .dw-btn, .dw-chip { transition: none; }
+  .dw-btn { transition: none; }
 }
 `;
 

@@ -1,10 +1,9 @@
 import React from 'react';
-import { LANGUAGES, MODES, WIDGETS } from '../../shared/types.js';
-import type { LanguageSetting, ModelRoute, TargetMode, WidgetId } from '../../shared/types.js';
+import { LANGUAGES, WIDGETS } from '../../shared/types.js';
+import type { LanguageSetting, ModelRoute, WidgetId } from '../../shared/types.js';
 import { matchesQuery, translatorFor } from '../kernel/i18n.js';
 import { isOn } from '../kernel/settingsStore.js';
 import type { SettingsView } from '../kernel/settingsStore.js';
-import { MODE_LABEL } from './targetChip.js';
 
 const FIELD: React.CSSProperties = {
   font: 'inherit', fontSize: 12, padding: '3px 6px', borderRadius: 6,
@@ -130,18 +129,7 @@ export function WidgetSettings({ store, models, locale }: WidgetSettingsProps): 
       React.createElement('div', { style: { fontSize: 14, lineHeight: '20px' } }, t(`widget.${id}`)),
       React.createElement('div', { style: { ...LABEL, marginTop: 4, lineHeight: '18px' } }, t(`widget.${id}.desc`)),
       // The shared model is shown once, under the first widget that uses it.
-      id === 'improvePrompt' && isOn(settings, id) ? analysisRow : null,
-      id === 'branchTarget' && isOn(settings, id)
-        ? React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 } },
-          React.createElement('span', { style: LABEL }, t('settings.mode')),
-          React.createElement('select', {
-            className: 'dw-field', 'data-dsh-widgets-default-mode': '',
-            value: settings.branchTarget?.mode ?? 'current',
-            onChange: (event: React.ChangeEvent<HTMLSelectElement>) => {
-              void store.save({ branchTarget: { mode: event.target.value as TargetMode } });
-            },
-          }, MODES.map((mode) => React.createElement('option', { key: mode, value: mode }, t(MODE_LABEL[mode])))))
-        : null),
+      id === 'improvePrompt' && isOn(settings, id) ? analysisRow : null),
     React.createElement(Switch, {
       'data-dsh-widgets-switch': '',
       on: isOn(settings, id),

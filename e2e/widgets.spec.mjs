@@ -202,12 +202,12 @@ try {
 
   // 1. The settings section is ours, is Chinese, and has one row per widget.
   await openWidgets(page);
-  assert.equal(await page.locator('[data-dsh-widgets-row]').count(), 7, 'seven widget rows');
+  assert.equal(await page.locator('[data-dsh-widgets-row]').count(), 5, 'five widget rows');
   assert.equal(await page.locator('[data-dsh-widgets-row="projectBrief"]').count(), 1);
   const sectionText = await page.locator('[data-dsh-widgets-settings]').innerText();
   assert.match(sectionText, /项目基本信息/, 'the panel speaks the app language');
-  assert.equal(/Branch per chat/.test(sectionText), false, 'no English left in a Chinese panel');
-  step('Settings → 小组件 shows seven rows, in Chinese');
+  assert.equal(/Improve prompt|Project brief/.test(sectionText), false, 'no English left in a Chinese panel');
+  step('Settings → 小组件 shows five rows, in Chinese');
 
   // 2. Off by default, and switching it on reaches the Host's settings file.
   const briefSwitch = page.locator('[data-dsh-widgets-row="projectBrief"] [data-dsh-widgets-switch]');
@@ -241,18 +241,7 @@ try {
   await closeSettings(page);
   await pause(800);
 
-  // 4. The target chip sits on the New Session row, beside the mode control, and speaks Chinese.
-  const chip = page.locator('[data-dsh-widgets-target="picker"]');
-  await chip.waitFor({ state: 'visible', timeout: 20_000 });
-  assert.match(await chip.innerText(), /main/, 'the chip names the branch the task will run on');
-  const chipBox = await chip.boundingBox();
-  const modeBox = await page.getByRole('button', { name: /标准模式|Standard/ }).first().boundingBox().catch(() => null);
-  if (modeBox !== null && chipBox !== null) {
-    assert.ok(Math.abs(chipBox.y - modeBox.y) < 40, `the chip is on the same row as the mode control (chip ${chipBox.y}, mode ${modeBox.y})`);
-  }
-  step('the target chip rides the New Session row, in the app language');
-
-  // 5. The wand has no box of its own: the shared stylesheet owns how it looks.
+  // 4. The wand has no box of its own: the shared stylesheet owns how it looks.
   const wand = page.locator('[data-dsh-widgets-wand]').first();
   await wand.waitFor({ state: 'visible', timeout: 10_000 });
   const border = await wand.evaluate((node) => {
@@ -262,7 +251,7 @@ try {
   assert.match(border, /^0px none/, `the wand draws no border (${border})`);
   step('the Improve prompt icon has no border and no background of its own');
 
-  // 6. The project brief is read quietly, and its own icon says so.
+  // 5. The project brief is read quietly, and its own icon says so.
   const briefIcon = page.locator('[data-dsh-widgets-brief]').first();
   await briefIcon.waitFor({ state: 'visible', timeout: 20_000 });
   await pause(4000);
@@ -278,7 +267,7 @@ try {
   );
   step('the project brief is read in the background and reports itself ready');
 
-  // 7a. The panel is a real popover: it closes from outside and from Escape, and its action looks pressable.
+  // 5a. The panel is a real popover: it closes from outside and from Escape, and its action looks pressable.
   await briefIcon.click();
   const panel = page.locator('[data-dsh-widgets-brief-panel]');
   await panel.waitFor({ state: 'visible', timeout: 10_000 });
@@ -308,7 +297,7 @@ try {
   await panel.waitFor({ state: 'detached', timeout: 10_000 });
   step('the brief panel closes from outside and from Escape, and its action looks like a button');
 
-  // 7. The wand works: not disabled, and pressing it really rewrites the draft through the model.
+  // 6. The wand works: not disabled, and pressing it really rewrites the draft through the model.
   const composer = page.locator('[data-composer-input]').first();
   await composer.waitFor({ state: 'visible', timeout: 20_000 });
   await composer.click();
@@ -323,7 +312,7 @@ try {
   assert.ok(bodies.length > 0, 'the wand called the model');
   step('the wand is pressable and rewrites the draft');
 
-  // 8. The first task opens with the project summary — and the hierarchy it was made from.
+  // 7. The first task opens with the project summary — and the hierarchy it was made from.
   await composer.click();
   await page.keyboard.press('Meta+A');
   await page.keyboard.press('Backspace');
@@ -340,7 +329,7 @@ try {
   assert.match(first, /README\.md/, 'the hierarchy names the project files');
   step('the first task opens with the summary plus the file hierarchy, as a prompt');
 
-  // 9. In a chat that now exists, Shift+Tab turns plan mode on through dsh's own command: the draft stays empty, and the
+  // 8. In a chat that now exists, Shift+Tab turns plan mode on through dsh's own command: the draft stays empty, and the
   //    next request carries the policy dsh attaches to a plan-mode turn.
   await composer.click();
   await page.keyboard.press('Shift+Tab');
@@ -355,14 +344,6 @@ try {
   assert.ok(bodies.length > 0, 'the second message reached the model');
   assert.match(second, /exit_plan_mode|plan mode/i, `the next request carries dsh's plan-mode policy (${second.slice(0, 160)})`);
   step('Shift+Tab turns plan mode on through dsh\'s own command: the next request carries the policy, the draft stays empty');
-
-  // 10. Once the chat has started the target is a read-only marker rather than a picker.
-  await pause(500);
-  const markers = page.locator('[data-dsh-widgets-target]');
-  const tagNames = await markers.evaluateAll((nodes) => nodes.map((node) => `${node.tagName.toLowerCase()}:${node.getAttribute('data-readonly')}`));
-  assert.ok(tagNames.every((entry) => entry.startsWith('span') || entry.endsWith('true')) || tagNames.length === 0,
-    `a started chat offers no way to switch where it runs (${JSON.stringify(tagNames)})`);
-  step('the target is read-only once the chat has started');
 
   assert.deepEqual(pageErrors, [], 'no page error');
   console.log(`dsh ${dshBin}\n${results.join('\n')}`);

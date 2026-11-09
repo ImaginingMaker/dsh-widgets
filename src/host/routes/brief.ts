@@ -107,20 +107,17 @@ export function installBrief(ctx: HostContext, home: string): BriefInstaller {
     requestBody: 'buffered',
     fetch: async (request: Request): Promise<Response> => {
       let sessionId: string | undefined;
-      let cwd: string | undefined;
       let retry = false;
 
       if (request.method === 'GET') {
         const url = new URL(request.url);
         sessionId = url.searchParams.get('sessionId') ?? undefined;
-        cwd = url.searchParams.get('cwd') ?? undefined;
         retry = url.searchParams.get('retry') === '1';
       } else {
         let body: Record<string, unknown>;
         try { body = (await request.json()) as Record<string, unknown>; } catch { return json({ error: 'bad request' }, 400); }
         if (!isText(body.sessionId, 200)) return json({ error: 'bad request' }, 400);
         sessionId = body.sessionId;
-        cwd = typeof body.cwd === 'string' ? body.cwd : undefined;
         retry = body.retry === true;
       }
 
@@ -129,7 +126,7 @@ export function installBrief(ctx: HostContext, home: string): BriefInstaller {
         return json({ status: 'idle' });
       }
 
-      const dir = await projectDirOf(ctx, { sessionId, cwd });
+      const dir = await projectDirOf(ctx, { sessionId });
       if (dir === undefined) return json({ error: 'this chat has no project folder' }, 400);
       const { record } = await runner.ensure(dir, retry);
       return json(viewOf(record, dir));

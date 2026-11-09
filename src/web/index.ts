@@ -12,7 +12,7 @@
  *    behind.
  */
 import React from 'react';
-import type { BriefView, LanguageSetting, TargetMode } from '../shared/types.js';
+import type { BriefView, LanguageSetting } from '../shared/types.js';
 import { translatorFor, resolveLanguage } from './kernel/i18n.js';
 import type { Language } from './kernel/i18n.js';
 import type { Translate } from './kernel/i18n.js';
@@ -29,7 +29,6 @@ import { PlanToggle } from './widgets/planToggle.js';
 import { QueuePanel } from './widgets/queue.js';
 import type { QueuedRow } from './widgets/queue.js';
 import { WidgetSettings } from './widgets/settings.js';
-import { TargetChip } from './widgets/targetChip.js';
 
 /** The slice of a dsh Client Context this plugin uses. */
 interface ClientContext {
@@ -85,8 +84,6 @@ function applyInner(ctx: ClientContext): void {
   const models = createModels();
   const language = (): Language => resolveLanguage(settings.getSnapshot().language, read(() => ctx.locale?.getSnapshot().active));
   const t = (): Translate => translatorFor(language());
-  const targetLanguage = (): LanguageSetting => (language() === 'zh' ? 'zh' : 'en');
-
   /**
    * Toggle plan mode for one chat through the Host, which is the only half that can reach dsh's command registry.
    *
@@ -101,9 +98,6 @@ function applyInner(ctx: ClientContext): void {
       return String((error as Error)?.message ?? error);
     }
   };
-
-  const projectPathOf = (sessionId: string): string | undefined =>
-    read(() => ctx.sessions?.list.getSnapshot().byId?.[sessionId]?.cwd);
 
   const panels: Panel[] = [
     {
@@ -153,43 +147,6 @@ function applyInner(ctx: ClientContext): void {
       }, BriefStatus))],
       off: null,
     },
-    {
-      id: 'branchTarget',
-      on: (state) => isOn(state, 'branchTarget'),
-      setup: () => [
-        // The picker rides the New Session row, beside the workspace and the mode controls.
-        ctx.slots.inject('conversation.hero.options', () => ctx.slots.register({
-          name: 'conversation.hero.options',
-          id: 'widgets-target-picker',
-          order: 20,
-          inject: (sessionId: string) => ({
-            sessionId,
-            projectPath: projectPathOf(sessionId),
-            language: targetLanguage(),
-            t: t(),
-            notify: notifyFor(ctx, sessionId),
-            variant: 'picker' as const,
-          }),
-        }, TargetChip)),
-        // Once the chat has started the same widget becomes a read-only marker above the composer.
-        ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
-          name: 'conversation.input.dock',
-          id: 'widgets-target-badge',
-          order: 20,
-          inject: (sessionId: string) => ({
-            sessionId,
-            projectPath: projectPathOf(sessionId),
-            language: targetLanguage(),
-            t: t(),
-            notify: notifyFor(ctx, sessionId),
-            variant: 'badge' as const,
-          }),
-        }, TargetChip)),
-      ],
-      off: null,
-    },
-    // Branches in the workspace tree does its work in the Host half; this half adds nothing to the page.
-    { id: 'branchTree', on: (state) => isOn(state, 'branchTree'), setup: () => [], off: null },
   ];
 
   const applyPanels = (): void => {
@@ -241,5 +198,4 @@ function applyInner(ctx: ClientContext): void {
   }, 'dsh-widgets: widgets');
 
   void (undefined as unknown as BriefView);
-  void (undefined as unknown as TargetMode);
 }

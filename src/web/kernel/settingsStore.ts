@@ -36,7 +36,6 @@ export function createSettings(): Sender<SettingsView> & { save(body: unknown): 
       ...EMPTY,
       ...value,
       on: { ...EMPTY.on, ...(value.on ?? {}) },
-      branchTarget: value.branchTarget ?? EMPTY.branchTarget,
       analysis: value.analysis ?? EMPTY.analysis,
       language: value.language ?? EMPTY.language,
       ready: true,

@@ -5,8 +5,6 @@
 
 /** Every widget, in Settings order. `WidgetId` is the single source of that list's type. */
 export const WIDGETS = [
-  'branchTarget',
-  'branchTree',
   'planToggle',
   'queueReorder',
   'queueEdit',
@@ -17,42 +15,7 @@ export const WIDGETS = [
 export type WidgetId = (typeof WIDGETS)[number];
 
 /** These do nothing until the user switches them on. */
-export const OFF_BY_DEFAULT: readonly WidgetId[] = ['branchTree', 'projectBrief'];
-
-/** The five ways a chat can start. A target is exactly one of these, which is what keeps a branch and a worktree apart. */
-export const MODES = ['current', 'branch', 'worktree', 'existing-branch', 'existing-worktree'] as const;
-
-export type TargetMode = (typeof MODES)[number];
-
-/**
- * A target the user picked. `branchName` is only meaningful for `branch` and `worktree`; `existingBranch` only for
- * `existing-branch`; `worktreePath` only for `existing-worktree`. The union makes the invalid combinations unrepresentable.
- */
-export type Target =
-  | { readonly mode: 'current' }
-  | { readonly mode: 'branch'; readonly branchName?: string }
-  | { readonly mode: 'worktree'; readonly branchName?: string }
-  | { readonly mode: 'existing-branch'; readonly existingBranch: string }
-  | { readonly mode: 'existing-worktree'; readonly worktreePath: string };
-
-/** What the picker needs to draw itself. */
-export interface TargetInfo {
-  readonly cwd: string;
-  readonly repo: boolean;
-  readonly branch: string | null;
-  readonly branches: readonly string[];
-  readonly worktrees: readonly { path: string; branch: string | null }[];
-  readonly mode: TargetMode;
-  readonly reason?: string;
-}
-
-/** Where a target was actually applied, as the Host answers it. */
-export interface TargetResult {
-  readonly cwd: string;
-  readonly branch: string | null;
-  readonly mode: TargetMode;
-  readonly worktree?: string;
-}
+export const OFF_BY_DEFAULT: readonly WidgetId[] = ['projectBrief'];
 
 /** One model route. */
 export interface ModelRoute {
@@ -73,7 +36,6 @@ export type LanguageSetting = (typeof LANGUAGES)[number];
  */
 export interface Settings {
   readonly on: Record<WidgetId, boolean>;
-  readonly branchTarget: { readonly mode: TargetMode };
   readonly analysis: { readonly model: ModelRoute | null; readonly effort: string | null };
   readonly language: LanguageSetting;
 }
@@ -82,7 +44,6 @@ export interface Settings {
 export type SettingsPatch =
   | { readonly kind: 'switch'; readonly id: WidgetId; readonly on: boolean }
   | { readonly kind: 'analysis'; readonly patch: { readonly model?: ModelRoute | null; readonly effort?: string | null } }
-  | { readonly kind: 'mode'; readonly mode: TargetMode }
   | { readonly kind: 'language'; readonly language: LanguageSetting };
 
 /** One provider and its models, as dsh's model configuration reports them. */

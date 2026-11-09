@@ -139,102 +139,6 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   assert.equal(render(rows, { on: { queueReorder: false, queueEdit: false } }), null);
 }
 
-// ---- the target chip ---------------------------------------------------------------------------------------------------
-{
-  const picker = find('widgets-target-picker');
-  assert.ok(picker !== undefined, 'the target picker registers');
-  assert.equal(picker.options.name, 'conversation.hero.options', 'it rides the New Session row, beside the mode control');
-
-  const state = {
-    cwd: '/repo', repo: true, branch: 'main', branches: ['main', 'feat/x'],
-    worktrees: [{ path: '/repo/.worktrees/feat-x', branch: 'feat/x' }], mode: 'current', locked: false,
-  };
-  answer = () => ({ value: state });
-
-  const props = picker.options.inject('s1');
-  assert.equal(props.projectPath, '/repo');
-  assert.equal(props.variant, 'picker');
-
-  resetHooks(); requests = [];
-  let tree = picker.Component(props);
-  await runEffects();
-  hookIndex = 0;
-  tree = picker.Component(props);
-  const chip = withProp(tree, 'data-dsh-widgets-target')[0];
-  assert.ok(chip !== undefined, 'the chip is drawn');
-  assert.equal(chip.type, 'button', 'a new chat can still choose');
-  assert.deepEqual(texts(chip), ['main'], 'the chip shows the current branch');
-
-  // Opening lists all five targets, and picking one records the intent — it creates nothing.
-  chip.props.onClick();
-  hookIndex = 0;
-  tree = picker.Component(props);
-  const modes = withProp(tree, 'data-dsh-widgets-mode')[0];
-  assert.deepEqual(modes.props.children.map((option) => option.props.value), ['current', 'branch', 'worktree', 'existing-branch', 'existing-worktree']);
-  requests = [];
-  modes.props.onChange({ target: { value: 'branch' } });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(lastRequest().url, '/api/widgets.target-intent');
-  assert.deepEqual(lastRequest().body, { mode: 'branch', sessionId: 's1' });
-
-  // A name typed into the field travels with the choice.
-  resetHooks(); requests = [];
-  tree = picker.Component(props);
-  await runEffects();
-  hookIndex = 0;
-  tree = picker.Component(props);
-  withProp(tree, 'data-dsh-widgets-target')[0].props.onClick();
-  hookIndex = 0;
-  tree = picker.Component(props);
-  withProp(tree, 'data-dsh-widgets-mode')[0].props.onChange({ target: { value: 'worktree' } });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  // Picking a mode records it and closes the panel; opening it again shows the name field for that mode.
-  hookIndex = 0;
-  tree = picker.Component(props);
-  withProp(tree, 'data-dsh-widgets-target')[0].props.onClick();
-  hookIndex = 0;
-  tree = picker.Component(props);
-  withProp(tree, 'data-dsh-widgets-branch-name')[0].props.onChange({ target: { value: 'feat/typed' } });
-  hookIndex = 0;
-  tree = picker.Component(props);
-  requests = [];
-  withProp(tree, 'data-dsh-widgets-branch-name')[0].props.onBlur();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(lastRequest().body, { mode: 'worktree', sessionId: 's1', branchName: 'feat/typed' });
-
-  // A chat that has started shows the choice, and offers no way to change it.
-  answer = () => ({ value: { ...state, locked: true, branch: 'feat/x', pending: 'branch' } });
-  resetHooks();
-  tree = picker.Component(props);
-  await runEffects();
-  hookIndex = 0;
-  tree = picker.Component(props);
-  const readonly = withProp(tree, 'data-dsh-widgets-target')[0];
-  assert.equal(readonly.type, 'span', 'a started chat cannot switch where it runs');
-  assert.equal(readonly.props['data-readonly'], 'true');
-
-  // The badge is the same widget in its second home, and it says nothing for the default target.
-  const badge = find('widgets-target-badge');
-  assert.equal(badge.options.name, 'conversation.input.dock');
-  // A chat started on the current branch has nothing to mark.
-  answer = () => ({ value: { ...state, locked: true } });
-  resetHooks();
-  let badgeTree = badge.Component({ ...badge.options.inject('s1') });
-  await runEffects();
-  hookIndex = 0;
-  badgeTree = badge.Component({ ...badge.options.inject('s1') });
-  assert.equal(badgeTree, null, 'the current branch needs no marker above the composer');
-
-  answer = () => ({ value: { ...state, locked: true, branch: 'feat/x', pending: 'branch' } });
-  resetHooks();
-  badgeTree = badge.Component({ ...badge.options.inject('s1') });
-  await runEffects();
-  hookIndex = 0;
-  badgeTree = badge.Component({ ...badge.options.inject('s1') });
-  assert.equal(withProp(badgeTree, 'data-dsh-widgets-target')[0].props['data-readonly'], 'true');
-  answer = () => ({ ok: true, value: {} });
-}
-
 // ---- the Improve prompt wand -------------------------------------------------------------------------------------------
 {
   const entry = find('widgets-improve');
@@ -284,7 +188,6 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   // that switch on, exactly as a second page load would.
   const settingsValue = {
     on: { projectBrief: true },
-    branchTarget: { mode: 'current' },
     analysis: { model: null, effort: null },
     language: 'zh',
   };
@@ -413,14 +316,14 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
     reasoningOf: async () => reasoning,
   });
   const settingsOf = (overrides = {}) => ({
-    on: {}, branchTarget: { mode: 'current' }, analysis: { model: null, effort: null }, language: 'zh', ...overrides,
+    on: {}, analysis: { model: null, effort: null }, language: 'zh', ...overrides,
   });
 
   // Every widget has a row, in Settings order, in Chinese.
   resetHooks();
   let tree = entry.Component({ store: makeStore(settingsOf()), models: makeModels({ supported: false, efforts: [] }), locale: ctx.locale });
   assert.deepEqual(withProp(tree, 'data-dsh-widgets-row').map((node) => node.props['data-dsh-widgets-row']),
-    ['branchTarget', 'branchTree', 'planToggle', 'queueReorder', 'queueEdit', 'improvePrompt', 'projectBrief']);
+    ['planToggle', 'queueReorder', 'queueEdit', 'improvePrompt', 'projectBrief']);
   assert.ok(texts(tree).includes('项目基本信息'), 'the new widget is described in the UI language');
 
   // A switch writes exactly its own id.
@@ -429,7 +332,7 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   tree = entry.Component({ store, models: makeModels({ supported: false, efforts: [] }), locale: ctx.locale });
   // The marker is on the Switch element and on the button it draws; the element is the one with `onChange`.
   const switches = withProp(tree, 'data-dsh-widgets-switch').filter((node) => typeof node.props.onChange === 'function');
-  assert.equal(switches.length, 7);
+  assert.equal(switches.length, 5);
   switches.find((node) => node.props.label === '项目基本信息').props.onChange(true);
   assert.deepEqual(store.saved, [{ id: 'projectBrief', on: true }]);
 
@@ -463,13 +366,6 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   assert.deepEqual(effortMenu.props.children.map((option) => option.props.value), ['', 'off', 'low', 'high'], 'off is offered like any other level');
   effortMenu.props.onChange({ target: { value: 'off' } });
   assert.deepEqual(effortStore.saved.at(-1), { analysis: { effort: 'off' } });
-
-  // The default target lives here too.
-  const modeStore = makeStore(settingsOf());
-  resetHooks();
-  tree = entry.Component({ store: modeStore, models: makeModels(reasoning), locale: ctx.locale });
-  withProp(tree, 'data-dsh-widgets-default-mode')[0].props.onChange({ target: { value: 'worktree' } });
-  assert.deepEqual(modeStore.saved, [{ branchTarget: { mode: 'worktree' } }]);
 
   // Search narrows the rows.
   resetHooks();

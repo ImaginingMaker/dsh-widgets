@@ -29,64 +29,16 @@ Requires dsh ≥ 0.2.2-rc.1. MIT licensed. **No runtime dependencies** — the p
 
 | Widget | What it does | Default |
 |---|---|---|
-| [Branch per chat](#branch-per-chat) | Start a task on the current branch, a new branch, a new worktree, or one that already exists. | on |
-| [Branches in the workspace tree](#branches-in-the-workspace-tree) | Each branch folder under `.worktrees/` becomes a project in the sidebar. | **off** |
-| [Shift+Tab plan mode](#shifttab-plan-mode) | `Shift+Tab` puts `/plan` at the start of the draft, or leaves plan mode. | on |
+| [Shift+Tab plan mode](#shifttab-plan-mode) | `Shift+Tab` turns plan mode on, and off again, through dsh's own command. | on |
 | [Queue drag-and-drop](#queue-drag-and-drop) | Reorder queued messages by drag, or by the arrow keys. | on |
 | [Edit queued message in place](#edit-queued-message-in-place) | Change a queued message's text before it is sent. | on |
 | [Improve prompt](#improve-prompt) | One model call rewrites your draft, with a model and a reasoning effort you choose. | on |
 | [Project brief](#project-brief) | A quiet summary of the project, gathered before the first task and handed to it. | **off** |
 
 Each widget's internal id — the key in `storages/dsh-widgets/settings.json`, and what to quote in an issue — is
-`branchTarget`, `branchTree`, `planToggle`, `queueReorder`, `queueEdit`, `improvePrompt` and `projectBrief`.
+`planToggle`, `queueReorder`, `queueEdit`, `improvePrompt` and `projectBrief`.
 
 ---
-
-### Branch per chat
-
-On the New Session row, beside the workspace and mode controls, a chip shows the branch the next task will run on.
-Picking a target only records it — the work is described to the agent, not scripted around it.
-
-Once the chat has sent a message the chip becomes a read-only marker: the choice is made at the start and is not offered
-again, so a mid-conversation click cannot silently move work to another branch.
-
-Five targets, and exactly one of them is in force at a time:
-
-| Target | Where the chat runs | Branch |
-|---|---|---|
-| **Current branch** (default) | The project folder | The branch it is already on — **no git command runs at all** |
-| **New branch…** | The project folder | A new branch cut from the current branch |
-| **New worktree…** | `<project>/.worktrees/<slug>` | A new branch cut from the current branch, owned by that worktree |
-| **An existing branch** | The project folder | That branch, checked out |
-| **An existing worktree** | That folder | The branch the worktree already has |
-
-**A branch and a worktree are mutually exclusive.** A target is a single choice: a `branch` target carries no checkout
-path, and a `worktree` target always creates its own branch. A request that asks for both is refused with a `400` before
-git is touched. This is enforced in `parseTarget` and covered by the tests.
-
-**Branch names are deterministic and offline.** No model call is made to name a branch, so the same message always
-proposes the same name: `feat/…`, or `fix/…` when the message reads like a bug report. A name already taken gets `-2`,
-`-3`. A message without ASCII letters (for example Chinese) becomes `feat/change`. You can type a name instead.
-
-**How it is carried out.** The plugin does not run `git switch` or `git worktree add` for a branch: it tells the agent
-where the task belongs, and the agent uses its own tools. A dirty tree, an existing branch or a refused checkout is
-therefore handled in the conversation, with your approvals, instead of by a script that cannot see it.
-
-The single exception is a new worktree, because the chat's working directory is a property of the session and no prompt can
-change it: the folder is created at the first step and the chat is moved into it, so its file tools really work there. If
-that move is not available, the note tells the agent to use absolute paths inside the worktree instead.
-
-**Refused, with a reason:** a folder that is not a repository, a repository with no commit yet, a branch that already
-exists, and a worktree folder that already exists. Nothing is overwritten.
-
-### Branches in the workspace tree
-
-**Off by default, and off means inert.** While it is off, the plugin does not read `.worktrees/`, does not add a project,
-and the route answers `{ "on": false, "folders": {} }`.
-
-Switched on: each folder directly under `<project>/.worktrees/` is registered as a project in dsh's own workspace list,
-by folder name. The sweep runs at start and every 30 s, and creating a project is idempotent — a folder already known is
-left alone. A folder that disappears stops being reported; its project is **not** deleted, so chats are never lost.
 
 ### Shift+Tab plan mode
 
@@ -194,12 +146,11 @@ what the agent needs most (where the code lives, which units exist) and the tree
 - **Model** — **Same as the chat**, or any model this Mac has configured, plus its reasoning effort. There is exactly one
   model setting: Improve prompt and Project brief both use it, so the plugin cannot call two different models by accident.
 
-Rows also carry their own controls: **Branch per chat** has the default target for a new task; the model and effort live
-under **Improve prompt**, next to the widget that shares them.
+Rows also carry their own controls: the model and effort live under **Improve prompt**, next to the widget that shares them.
 
 Search filters the rows by name and description, ignoring case and accents.
 
-All six switches live in one file, `storages/dsh-widgets/settings.json` under the dsh home, written owner-only and
+All five switches live in one file, `storages/dsh-widgets/settings.json` under the dsh home, written owner-only and
 atomically (a temp file, then a rename), so a reader never sees half a file and one broken write cannot lock you out —
 a missing or unreadable file reads as the defaults.
 
@@ -207,15 +158,12 @@ a missing or unreadable file reads as the defaults.
 
 - **No network call** is made at start, and nothing is sent anywhere by this plugin.
 - **Improve prompt** calls the model only when you click the wand.
-- **Branch per chat** runs git only when you press **Start there**, and never for the default target.
-- **Branches in the workspace tree** writes to dsh's own workspace list, and only while it is switched on.
+- **Project brief** calls it once per project shape, from the hierarchy it read, and caches the result.
 
 ## Limits
 
-- Branch names are ASCII. A message that is entirely non-ASCII becomes `feat/change`; type a name to be specific.
-- A worktree is created under `<project>/.worktrees/`; a folder of the same name is never overwritten.
-- Ignored files (`node_modules/`, `.env`) are **not** copied into a new worktree. Install dependencies there, or start
-  the work in the project folder.
+- The only git command this plugin runs is `git rev-parse HEAD`, to notice that a project changed. Ignored files
+  (`node_modules/`, `.env`) are never read for a summary.
 - The queue strip owns its own rows; it does not graft controls onto dsh's markup, so a dsh update cannot leave a
   half-drawn handle behind. The trade-off is that it is a separate strip rather than handles inside dsh's own rows.
 - This build does not add new images to a queued message.
@@ -261,14 +209,14 @@ through a guard, so a profile that lacks one still loads every widget it can.
 ```
 src/
 ├── shared/     pure, no node:, no React — compiled into both halves
-│   ├── types.ts  settings.ts  reasoning.ts  branch.ts  queue.ts  routes.ts
+│   ├── types.ts  settings.ts  reasoning.ts  queue.ts  brief.ts  routes.ts  styles.ts
 ├── host/       node: allowed, no DOM
 │   ├── index.ts  store.ts  files.ts  git.ts  project.ts
-│   └── routes/   settings, models, branchTarget, branchTree, improve, queue
+│   └── routes/   settings, models, improve, queue, brief, plan
 └── web/        DOM only, no node:
     ├── index.ts  slot.ts
     ├── kernel/   i18n, settingsStore, modelStore, hostJson, queueApi, plan, safe
-    └── widgets/  planToggle, queue, improve, branchTarget, settings
+    └── widgets/  planToggle, queue, improve, briefStatus, settings
 ```
 
 `src/shared` is the contract between the halves: if it needs `node:fs` or `document`, it belongs in one of the others.
@@ -281,13 +229,11 @@ The suite is plain `node --test` with no test framework:
 |---|---|
 | `test/meta.test.mjs` | manifest, bundle patch, CI, README, both languages, the build pipeline |
 | `test/settings.test.mjs` | defaults, narrowing, atomic owner-only writes, serialized writes, every patch shape |
-| `test/branch-target.test.mjs` | name rules, the five modes, **mutual exclusion**, and real git in a temporary repository |
-| `test/branch-tree.test.mjs` | inert while off, idempotent while on, non-destructive on removal |
 | `test/reasoning.test.mjs` | efforts read from the model configuration, and what is actually sent |
 | `test/improve.test.mjs` | the prompt, safe file reads, the route, superseding, failures |
 | `test/queue.test.mjs` | the ordering rule and both queue routes |
 | `test/client-plan.test.mjs` | the built bundle's `PlanToggle` against a fake DOM |
-| `test/client-widgets.test.mjs` | the built bundle's components: queue, picker, wand, settings |
+| `test/client-widgets.test.mjs` | the built bundle's components: queue, wand, brief icon, settings |
 
 The client tests run **`dist/web/client.js`**, not the sources — so they also prove the loader wrapper and the externals
 are right. They stub `window.__ModuleLoader__`, React and the DOM; they do not prove anything about how dsh renders.
@@ -304,18 +250,21 @@ That is what `npm run e2e` is for. It is not a mock:
 
 ```
 ✓ dsh started and rendered with dsh-widgets loaded
-✓ Settings → Widgets shows the six rows
+✓ Settings → 小组件 shows five rows, in Chinese
 ✓ a switch writes storages/dsh-widgets/settings.json
-✓ a model without reasoningEfforts offers no effort menu
-✓ the reasoning ladder is read from the model configuration, and the choice is saved
-✓ the target picker is in the composer with all five modes, defaulting to the current branch
-✓ a new worktree created a real branch and checkout, and left the project folder alone
-✓ Shift+Tab writes and removes the /plan prefix in the real composer
+✓ the reasoning ladder comes from the model configuration, and off is a level of it
+✓ the Improve prompt icon has no border and no background of its own
+✓ the project brief is read in the background and reports itself ready
+✓ the brief panel closes from outside and from Escape, and its action looks like a button
+✓ the wand is pressable and rewrites the draft
+✓ the first task opens with the summary plus the file hierarchy, as a prompt
+✓ Shift+Tab turns plan mode on through dsh's own command: the next request carries the policy, the draft stays empty
 ```
 
-This is the check that found three real defects the unit tests could not: a host half that asked cordis for `timer`
-without declaring it, a client half that did the same for `remote` and `slots`, and a browser page opened without dsh's
-access token. CI runs it on Node 24 alongside the unit matrix.
+This is the check that found the defects the unit tests could not: a host half that asked cordis for `timer` without
+declaring it, a client half that did the same for `remote` and `slots`, a browser page opened without dsh's access token,
+a prepared model call dispatched without its resolved config, and a wand that was disabled for want of a model the client
+could never see. CI runs it on Node 24 alongside the unit matrix.
 
 ## License
 
@@ -340,28 +289,7 @@ dsh plugin --profile web add dsh-widgets
 
 然后重启 dsh。需要 dsh ≥ 0.2.2-rc.1，MIT 许可，**无运行时依赖** —— 发布包里只有构建产物。
 
-### 六个组件
-
-**按会话使用分支** —— 输入框上方显示「开始于：`分支名`」。在你按下 **在这里开始** 之前，不会创建任何东西。
-五个目标，任何时候只有一个生效：
-
-| 目标 | 会话目录 | 分支 |
-|---|---|---|
-| **当前分支**（默认） | 项目文件夹 | 它当前所在的分支 —— **完全不执行任何 git 命令** |
-| **新建分支…** | 项目文件夹 | 从当前分支切出新分支 |
-| **新建 worktree…** | `<项目>/.worktrees/<slug>` | 从当前分支切出新分支，由该 worktree 独占 |
-| **已有分支** | 项目文件夹 | 检出该分支 |
-| **已有 worktree** | 该目录 | 该 worktree 已绑定的分支 |
-
-**分支与 worktree 互斥**：目标是单值选择。`branch` 目标不带 worktree 路径，`worktree` 目标必然自己创建新分支；
-同时要求两者的请求会在触碰 git 之前被 `400` 拒绝。这一不变量由 `parseTarget` 强制，并有测试覆盖。
-
-分支名**确定且离线**生成（不为此调用模型）：`feat/…`，消息读起来像缺陷时用 `fix/…`；重名加 `-2`、`-3`；
-纯中文消息会得到 `feat/change`；也可以自己输入名字。
-
-**工作区树中的分支目录** —— **默认关闭，关闭时完全惰性**：不读 `.worktrees/`、不添加项目、路由返回空。
-开启后，`<项目>/.worktrees/` 下的每个目录会按目录名注册为 dsh 自己的项目，启动时与每 30 秒扫描一次，
-重复执行不会重复添加；目录消失只是不再上报，**不会删除项目**，聊天不会丢失。
+### 五个组件
 
 **Shift+Tab 计划模式** —— 在草稿最前面加上 `/plan `，再按一次移除。这正是 dsh 自己识别的格式（`/plan` 后接
 空格、制表符或行尾）；`/planning` 不会被误判。只改前缀，草稿其余内容、文件 chip 与附件保持不变，光标移到末尾。
@@ -399,17 +327,16 @@ reasoningEfforts:
 
 ### 设置与隐私
 
-六个开关都保存在 dsh 主目录下的 `storages/dsh-widgets/settings.json`，仅本人可读，原子写入（先写临时文件再
+五个开关都保存在 dsh 主目录下的 `storages/dsh-widgets/settings.json`，仅本人可读，原子写入（先写临时文件再
 重命名），因此读方不会读到半个文件，一次坏写入也不会把人锁在设置之外——文件缺失或损坏都按默认值读取。
 
-本插件**不发起任何网络请求**；「提示词优化」只在你点击魔法棒时调用模型；「按会话使用分支」只在你按下
-**在这里开始** 时执行 git，默认目标下完全不执行；「工作区树中的分支目录」只在开启时写入 dsh 自己的项目列表。
+本插件**不发起任何网络请求**；「提示词优化」只在你点击魔法棒时调用模型；「项目基本信息」只在你打开该组件时
+调用一次模型，并按键入了目录树的指纹缓存。
 
 ### 已知限制
 
-- 分支名为 ASCII；纯非 ASCII 消息会得到 `feat/change`，需要更明确就自己输入名字。
-- worktree 建在 `<项目>/.worktrees/` 下，同名目录绝不覆盖。
-- 被忽略的文件（`node_modules/`、`.env`）**不会**复制进新 worktree；请在该目录安装依赖后再继续。
+- 本插件唯一执行的 git 命令是 `git rev-parse HEAD`，用来发现项目已变化；被忽略的文件（`node_modules/`、`.env`）
+  永远不会被读取来生成摘要。
 - 队列条自成一列，不去改写 dsh 自身的 DOM：好处是 dsh 升级不会留下画了一半的手柄，代价是它是独立的一条，
   而不是嵌在 dsh 自己的行里。
 - 本版本不支持从队列条新增图片。
@@ -447,7 +374,7 @@ npm run e2e         # 先构建，再在真实 dsh 与真实浏览器里跑端�
 - 用 Playwright 打开**真实 Chrome**，走 dsh 打印的 access token；
 - 起一个假的 OpenAI 兼容模型，不调用任何真实供应商；
 - 断言真实发生的事情：设置面板六行、开关真的写进 `storages/dsh-widgets/settings.json`、没有 `reasoningEfforts`
-  的模型不显示档位菜单、有 `off/low/high` 的模型下拉恰好那三项、新建 worktree 真的在磁盘上建出目录与分支、
+  的模型不显示档位菜单、有 `off/low/high` 的模型下拉恰好那三项、
   Shift+Tab 在真实 composer 里写入并移除 `/plan `。
 
 **它抓到过三个单元测试抓不到的真实缺陷**：Host 半未声明 `timer` 就读它、客户端半同样未声明 `remote` 与 `slots`、

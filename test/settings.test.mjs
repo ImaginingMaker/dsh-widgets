@@ -4,38 +4,33 @@ import assert from 'node:assert/strict';
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  LANGUAGES, MODES, OFF_BY_DEFAULT, SETTINGS_PATH, WIDGETS, defaultOn, defaultSettings, installSettings,
+  LANGUAGES, OFF_BY_DEFAULT, SETTINGS_PATH, WIDGETS, defaultOn, defaultSettings, installSettings,
   isWidget, parseSettingsPatch, sanitizeSettings, settingsStore,
 } from '../dist/index.js';
 import { call, makeCtx, tempDir } from './helpers.mjs';
 
-// The switch table: six widgets, one off by default, and the default follows that list.
-assert.equal(WIDGETS.length, 7);
-assert.deepEqual(OFF_BY_DEFAULT, ['branchTree', 'projectBrief']);
+// The switch table: five widgets, one off by default, and the default follows that list.
+assert.equal(WIDGETS.length, 5);
+assert.deepEqual(OFF_BY_DEFAULT, ['projectBrief']);
 assert.equal(defaultOn('projectBrief'), false, 'Project brief waits for the user');
-assert.equal(defaultOn('branchTree'), false);
 for (const id of WIDGETS.filter((entry) => !OFF_BY_DEFAULT.includes(entry))) assert.equal(defaultOn(id), true, id);
-assert.equal(isWidget('branchTree'), true);
+assert.equal(isWidget('planToggle'), true);
+assert.equal(isWidget('branchTree'), false, 'a removed widget is not a widget');
 assert.equal(isWidget('nope'), false);
 assert.deepEqual(Object.keys(defaultSettings().on).sort(), [...WIDGETS].sort());
-assert.equal(defaultSettings().branchTarget.mode, 'current');
 assert.equal(defaultSettings().analysis.model, null);
 assert.equal(defaultSettings().analysis.effort, null);
 assert.equal(defaultSettings().language, 'auto');
 
 // Narrowing: unknown keys go, wrong types fall back, and a good value survives.
 const narrowed = sanitizeSettings({
-  on: { branchTree: true, planToggle: 'yes', extra: true },
-  branchTarget: { mode: 'worktree', junk: 1 },
+  on: { projectBrief: true, planToggle: 'yes', extra: true },
   analysis: { model: { provider: 'p', model: 'm', extra: 1 }, effort: 'low' },
   language: 'zh',
   unknown: 1,
 });
-assert.equal(narrowed.on.branchTree, true);
 assert.equal(narrowed.on.planToggle, true, 'a wrong type keeps the default');
 assert.equal('extra' in narrowed.on, false, 'an unknown switch is dropped');
-assert.equal(narrowed.branchTarget.mode, 'worktree');
-assert.deepEqual(narrowed.branchTarget, { mode: 'worktree' });
 assert.deepEqual(narrowed.analysis.model, { provider: 'p', model: 'm' });
 assert.equal(narrowed.analysis.effort, 'low');
 assert.equal(narrowed.language, 'zh');
@@ -46,20 +41,16 @@ for (const bad of [null, 'text', 42, [], undefined]) assert.deepEqual(sanitizeSe
 // The 0.2.x file kept the model under `improve`; an upgrade must not lose the user's choice.
 assert.deepEqual(sanitizeSettings({ improve: { model: { provider: 'p', model: 'm' }, effort: 'high' } }).analysis,
   { model: { provider: 'p', model: 'm' }, effort: 'high' });
-assert.equal(sanitizeSettings({ branchTarget: { mode: 'bogus' } }).branchTarget.mode, 'current');
-for (const mode of MODES) assert.equal(sanitizeSettings({ branchTarget: { mode } }).branchTarget.mode, mode);
 
 // The patch parser: what the panel sends, and everything it may not send.
 assert.deepEqual(parseSettingsPatch({ id: 'planToggle', on: false }), { patch: { kind: 'switch', id: 'planToggle', on: false } });
 assert.deepEqual(parseSettingsPatch({ analysis: { effort: 'high' } }), { patch: { kind: 'analysis', patch: { effort: 'high' } } });
 assert.deepEqual(parseSettingsPatch({ analysis: { model: null } }), { patch: { kind: 'analysis', patch: { model: null } } });
 assert.deepEqual(parseSettingsPatch({ language: 'zh' }), { patch: { kind: 'language', language: 'zh' } });
-assert.deepEqual(parseSettingsPatch({ branchTarget: { mode: 'worktree' } }), { patch: { kind: 'mode', mode: 'worktree' } });
 for (const bad of [
   null, 'x', {}, { id: 'nope', on: true }, { id: 'planToggle', on: 'yes' }, { id: 'planToggle' },
   { analysis: {} , extra: 1 }, { analysis: { nope: 1 } }, { analysis: { model: { provider: 'p' } } },
-  { analysis: { effort: '' } }, { branchTarget: { mode: 'bogus' } }, { branchTarget: { mode: 'current', x: 1 } },
-  { branchTarget: {} }, { language: 'fr' }, { language: 1 },
+  { analysis: { effort: '' } }, { branchTarget: { mode: 'current' } }, { language: 'fr' }, { language: 1 },
 ]) {
   assert.equal(parseSettingsPatch(bad).error, 'bad request', JSON.stringify(bad));
 }
@@ -75,11 +66,11 @@ writeFileSync(file, '{not json');
 assert.deepEqual(store.read(), defaultSettings(), 'broken file reads as defaults');
 
 // A write creates the folder, keeps the file owner-only, and lands the narrowed shape.
-const written = await store.write((current) => ({ ...current, on: { ...current.on, branchTree: true } }));
-assert.equal(written.on.branchTree, true);
-assert.equal(JSON.parse(readFileSync(file, 'utf8')).on.branchTree, true);
+const written = await store.write((current) => ({ ...current, on: { ...current.on, projectBrief: true } }));
+assert.equal(written.on.projectBrief, true);
+assert.equal(JSON.parse(readFileSync(file, 'utf8')).on.projectBrief, true);
 assert.equal(statSync(file).mode & 0o777, 0o600, 'owner-only');
-assert.equal(store.read().on.branchTree, true);
+assert.equal(store.read().on.projectBrief, true);
 
 // Two writes in flight are serialized rather than interleaved: both land, in order.
 await Promise.all([
@@ -101,9 +92,6 @@ assert.deepEqual(store.read().analysis.model, { provider: 'p', model: 'm' });
   const off = await call(routes, SETTINGS_PATH, { method: 'POST', body: { id: 'improvePrompt', on: false } });
   assert.equal(off.status, 200);
   assert.equal(off.json.on.improvePrompt, false);
-
-  const mode = await call(routes, SETTINGS_PATH, { method: 'POST', body: { branchTarget: { mode: 'worktree' } } });
-  assert.equal(mode.json.branchTarget.mode, 'worktree');
 
   const model = await call(routes, SETTINGS_PATH, { method: 'POST', body: { analysis: { model: { provider: 'aliyun-code-plan', model: 'deepseek-v4.1-flash-1017' } } } });
   assert.deepEqual(model.json.analysis.model, { provider: 'aliyun-code-plan', model: 'deepseek-v4.1-flash-1017' });

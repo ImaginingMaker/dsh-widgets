@@ -64,41 +64,12 @@ export function realSubprocess() {
 }
 
 /** Run one command synchronously in a test repository, for arranging state. */
-export function gitSync(cwd, args) {
-  return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } }, (error, stdout, stderr) => {
-      if (error !== null) reject(new Error(stderr || String(error)));
-      else resolve(stdout);
-    });
-  }).then((stdout) => stdout);
-}
-
-/** A temporary folder that is removed by `cleanup()`. */
 export function tempDir(prefix = 'dsh-widgets-') {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 /** A real git repository with one commit on `main`, plus a helper to add a second commit. */
-export async function makeRepo() {
-  const { dir, cleanup } = tempDir('dsh-widgets-repo-');
-  await gitSync(dir, ['init', '-b', 'main']);
-  await gitSync(dir, ['config', 'user.email', 'test@example.com']);
-  await gitSync(dir, ['config', 'user.name', 'test']);
-  writeFileSync(join(dir, 'README.md'), '# repo\n');
-  await gitSync(dir, ['add', '.']);
-  await gitSync(dir, ['commit', '-m', 'first']);
-  return { dir, cleanup };
-}
-
-/** A folder that is not a git repository. */
-export function makePlainDir() {
-  const { dir, cleanup } = tempDir('dsh-widgets-plain-');
-  mkdirSync(join(dir, 'sub'), { recursive: true });
-  return { dir, cleanup };
-}
-
-/** The `llm` service shape this plugin uses, over a fixed provider table. */
 export function makeLlm(table, { preparers } = {}) {
   const calls = [];
   return {

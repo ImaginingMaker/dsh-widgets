@@ -39,7 +39,7 @@ export function readInside(dir: string, name: string, maxBytes = BRIEF_FILE_MAX)
 export const TREE_DEPTH = 3;
 export const TREE_MAX_ENTRIES = 400;
 
-/** Directories that are never worth reading: they are either huge, generated, or this plugin's own worktrees. */
+/** Directories that are never worth reading: they are huge, generated, or dsh's own scratch space. */
 const TREE_SKIP = new Set(['node_modules', '.git', '.worktrees']);
 
 /** A file name as it may appear in a prompt: one line, no control characters, bounded. */

@@ -1,5 +1,5 @@
-import { LANGUAGES, MODES, OFF_BY_DEFAULT, WIDGETS } from './types.js';
-import type { LanguageSetting, Settings, SettingsPatch, TargetMode, WidgetId } from './types.js';
+import { LANGUAGES, OFF_BY_DEFAULT, WIDGETS } from './types.js';
+import type { LanguageSetting, Settings, SettingsPatch, WidgetId } from './types.js';
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -17,14 +17,10 @@ export const defaultOn = (id: WidgetId): boolean => !OFF_BY_DEFAULT.includes(id)
 export function defaultSettings(): Settings {
   return {
     on: Object.fromEntries(WIDGETS.map((id) => [id, defaultOn(id)])) as Record<WidgetId, boolean>,
-    branchTarget: { mode: 'current' },
     analysis: { model: null, effort: null },
     language: 'auto',
   };
 }
-
-const isMode = (value: unknown): value is TargetMode =>
-  typeof value === 'string' && (MODES as readonly string[]).includes(value);
 
 const isLanguage = (value: unknown): value is LanguageSetting =>
   typeof value === 'string' && (LANGUAGES as readonly string[]).includes(value);
@@ -51,10 +47,6 @@ export function sanitizeSettings(value: unknown): Settings {
     }
   }
 
-  const mode: TargetMode = isPlainObject(source.branchTarget) && isMode(source.branchTarget.mode)
-    ? source.branchTarget.mode
-    : next.branchTarget.mode;
-
   const analysisSource = isPlainObject(source.analysis) ? source.analysis : (isPlainObject(source.improve) ? source.improve : {});
   let model = next.analysis.model;
   let effort = next.analysis.effort;
@@ -65,14 +57,14 @@ export function sanitizeSettings(value: unknown): Settings {
 
   const language: LanguageSetting = isLanguage(source.language) ? source.language : next.language;
 
-  return { on, branchTarget: { mode }, analysis: { model, effort }, language };
+  return { on, analysis: { model, effort }, language };
 }
 
 /** The result of reading one patch off the wire: the patch, or the reason it is refused. */
 export type PatchResult = { patch: SettingsPatch } | { error: 'bad request' };
 
 /**
- * What a change may touch: `{id, on}`, `{analysis: {...}}`, `{branchTarget: {mode}}` or `{language}`.
+ * What a change may touch: `{id, on}`, `{analysis: {...}}` or `{language}`.
  */
 export function parseSettingsPatch(body: unknown): PatchResult {
   if (!isPlainObject(body)) return { error: 'bad request' };
@@ -104,13 +96,6 @@ export function parseSettingsPatch(body: unknown): PatchResult {
     return { patch: { kind: 'analysis', patch: result } };
   }
 
-  if (keys.length === 1 && keys.includes('branchTarget')) {
-    const branchTarget = body.branchTarget;
-    if (!isPlainObject(branchTarget) || Object.keys(branchTarget).length !== 1) return { error: 'bad request' };
-    if (!isMode(branchTarget.mode)) return { error: 'bad request' };
-    return { patch: { kind: 'mode', mode: branchTarget.mode } };
-  }
-
   if (keys.length === 1 && keys.includes('language')) {
     if (!isLanguage(body.language)) return { error: 'bad request' };
     return { patch: { kind: 'language', language: body.language } };
@@ -124,8 +109,6 @@ export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
   switch (patch.kind) {
     case 'switch':
       return { ...current, on: { ...current.on, [patch.id]: patch.on } };
-    case 'mode':
-      return { ...current, branchTarget: { mode: patch.mode } };
     case 'language':
       return { ...current, language: patch.language };
     case 'analysis': {
