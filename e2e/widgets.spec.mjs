@@ -278,6 +278,36 @@ try {
   );
   step('the project brief is read in the background and reports itself ready');
 
+  // 7a. The panel is a real popover: it closes from outside and from Escape, and its action looks pressable.
+  await briefIcon.click();
+  const panel = page.locator('[data-dsh-widgets-brief-panel]');
+  await panel.waitFor({ state: 'visible', timeout: 10_000 });
+  const action = page.locator('[data-dsh-widgets-reanalyze]');
+  const actionStyle = await action.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { border: style.borderTopWidth, cursor: style.cursor, width: node.getBoundingClientRect().width };
+  });
+  assert.notEqual(actionStyle.border, '0px', `the re-analyse action has a visible border (${JSON.stringify(actionStyle)})`);
+  assert.equal(actionStyle.cursor, 'pointer');
+  // A picture of the panel is worth keeping when someone is reviewing how it looks.
+  if (process.env.WIDGETS_SHOT === '1') {
+    await mkdir(join(repo, 'e2e/artifacts'), { recursive: true });
+    await page.locator('[data-composer-seat]').first().screenshot({ path: join(repo, 'e2e/artifacts/brief-panel.png') }).catch(async () => {
+      await panel.screenshot({ path: join(repo, 'e2e/artifacts/brief-panel.png') });
+    });
+  }
+
+  // A click outside the popover closes it — the bug was that only the icon could. The click goes to empty space in the
+  // conversation area, not to the composer, which the popover overlaps.
+  await page.mouse.click(700, 140);
+  await panel.waitFor({ state: 'detached', timeout: 10_000 });
+
+  await briefIcon.click();
+  await panel.waitFor({ state: 'visible', timeout: 10_000 });
+  await page.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached', timeout: 10_000 });
+  step('the brief panel closes from outside and from Escape, and its action looks like a button');
+
   // 7. The wand works: not disabled, and pressing it really rewrites the draft through the model.
   const composer = page.locator('[data-composer-input]').first();
   await composer.waitFor({ state: 'visible', timeout: 20_000 });

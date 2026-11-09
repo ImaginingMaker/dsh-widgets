@@ -17,6 +17,14 @@ const BookIcon = ({ spinning }: { readonly spinning: boolean }): React.ReactElem
   stroke: 'currentColor', strokeWidth: 1.2, strokeLinejoin: 'round', strokeLinecap: 'round',
 }));
 
+/** A small circular arrow: enough to read "this does something" without a second label. */
+const RetryIcon = (): React.ReactElement => React.createElement('svg', {
+  viewBox: '0 0 16 16', width: 12, height: 12, fill: 'none', 'aria-hidden': true,
+}, React.createElement('path', {
+  d: 'M13 8a5 5 0 1 1-1.5-3.6M13 2.4v2.8h-2.8',
+  stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round',
+}));
+
 const Dot = ({ tone }: { readonly tone: 'ready' | 'failed' }): React.ReactElement => React.createElement('span', {
   className: 'dw-brief-dot',
   style: { background: tone === 'failed' ? 'var(--dsw-alias-state-warn-label, #b25000)' : 'var(--dsw-alias-state-success-label, #2f8f4e)' },
@@ -55,6 +63,25 @@ export function BriefStatus({ sessionId, t, notify }: BriefStatusProps): React.R
 
   React.useEffect(() => { void ask(false); }, [ask]);
 
+  // A popover that only closes by pressing its own trigger is a trap. Clicking anywhere else, or Escape, closes it — and
+  // the check is against the DOM, not a ref, so it keeps working when the panel is rendered outside this subtree.
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const inside = (target: unknown): boolean => {
+      const element = target as { closest?(selector: string): unknown } | null;
+      if (element?.closest === undefined) return false;
+      try { return element.closest('.dw-brief') !== null; } catch { return false; }
+    };
+    const onPointer = (event: { target?: unknown }): void => { if (!inside(event.target)) setOpen(false); };
+    const onKey = (event: { key?: string }): void => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', onPointer, true);
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [open]);
+
   // Poll only while a read is in flight, and stop on its own so an abandoned page does not keep asking.
   const status = view?.status;
   React.useEffect(() => {
@@ -78,6 +105,8 @@ export function BriefStatus({ sessionId, t, notify }: BriefStatusProps): React.R
       type: 'button', className: 'dw-btn', 'data-dsh-widgets-brief': view.status,
       title: view.status === 'failed' ? `${label} — ${t('brief.retry')}` : label,
       'aria-label': label, 'aria-busy': view.status === 'analyzing',
+      'aria-expanded': view.status === 'ready' ? open : undefined,
+      'aria-haspopup': view.status === 'ready' ? 'dialog' : undefined,
       onClick: () => {
         if (view.status === 'failed') { void ask(true); return; }
         setOpen(!open);
@@ -87,13 +116,16 @@ export function BriefStatus({ sessionId, t, notify }: BriefStatusProps): React.R
       : view.status === 'ready' ? React.createElement(Dot, { tone: 'ready' })
         : React.createElement(Dot, { tone: 'failed' })),
     view.status === 'ready' && open
-      ? React.createElement('div', { role: 'dialog', 'data-dsh-widgets-brief-panel': '', className: 'dw-panel', style: { bottom: 28, right: 0, maxWidth: 360 } },
-        React.createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } }, t('brief.preview')),
-        React.createElement('div', { style: { fontSize: 12, lineHeight: '18px', whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto' } }, view.text ?? ''),
-        React.createElement('button', {
-          type: 'button', className: 'dw-btn', style: { alignSelf: 'flex-start' },
-          onClick: () => { setOpen(false); void ask(true); },
-        }, t('brief.reanalyze')))
+      ? React.createElement('div', {
+        role: 'dialog', 'data-dsh-widgets-brief-panel': '', className: 'dw-panel',
+        'aria-label': t('brief.ready'), style: { bottom: 28, right: 0, width: 340, maxWidth: '80vw' },
+      },
+      React.createElement('div', { className: 'dw-panel-head' }, t('brief.preview')),
+      React.createElement('div', { className: 'dw-panel-body' }, view.text ?? ''),
+      React.createElement('button', {
+        type: 'button', className: 'dw-action', 'data-dsh-widgets-reanalyze': '',
+        onClick: () => { setOpen(false); void ask(true); },
+      }, React.createElement(RetryIcon), t('brief.reanalyze')))
       : null,
   );
 }

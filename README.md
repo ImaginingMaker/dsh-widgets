@@ -177,9 +177,10 @@ what the agent needs most (where the code lives, which units exist) and the tree
 - **One read per project**, keyed by its real path and a fingerprint of `HEAD`, the hierarchy and the documents' size and
   mtime. A summary made from an older shape of the project is rebuilt on the next task; an unchanged one is reused, so the
   model is not called again.
-- **The composer shows it**: a spinner while reading, a dot when ready (its tooltip is the summary), and a warning dot
-  when it failed — its tooltip carries the reason, and a click tries again. Nothing is written into the composer, and a
-  folder with nothing in it shows nothing at all. Switching the widget off removes the icon and stops every read.
+- **The composer shows it**: a spinner while reading, a dot when ready, and a warning dot when it failed — its tooltip
+  carries the reason, and a click tries again. A ready dot opens the summary in a small popover with a **Re-analyse**
+  button; clicking anywhere else or pressing Escape closes it. Nothing is written into the composer, and a folder with
+  nothing in it shows nothing at all. Switching the widget off removes the icon and stops every read.
 - It costs one model call per project change, not per chat.
 
 ---

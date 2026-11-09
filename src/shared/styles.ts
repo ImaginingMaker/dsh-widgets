@@ -72,6 +72,44 @@ export const WIDGETS_CSS = `
 }
 .dw-error { font-size: 12px; color: var(--dsw-alias-state-warn-label, #b25000); }
 
+/* A panel action. Unlike .dw-btn, this one has to look pressable: a bordered row across the panel's foot. */
+.dw-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  align-self: stretch;
+  margin-top: 4px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-primary, inherit);
+  background: transparent;
+  border: .5px solid var(--dsw-alias-border-l2, #ccc);
+  border-radius: var(--dsw-radius-sm, 6px);
+  cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease;
+}
+.dw-action:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
+.dw-action:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3b6cf6); outline-offset: 1px; }
+.dw-action:active { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.18)); }
+.dw-action svg { flex: none; }
+
+.dw-panel-head {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary, inherit);
+  padding-bottom: 2px;
+}
+.dw-panel-body {
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 40vh;
+}
+
 .dw-queue { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; font-size: 12px; color: var(--dsw-alias-label-secondary, inherit); }
 .dw-queue-row { display: flex; align-items: center; gap: 6px; min-height: 22px; border-radius: var(--dsw-radius-sm, 6px); padding: 1px 4px; }
 .dw-queue-over { outline: 1px dashed var(--dsw-alias-state-business-primary, #3b6cf6); }

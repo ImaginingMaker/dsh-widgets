@@ -49,10 +49,13 @@ const texts = (tree) => nodes(tree).flatMap((node) => node.props?.children ?? []
 
 // ---- the fake page -----------------------------------------------------------------------------------------------------
 const styleNodes = [];
+const listeners = new Map();
 globalThis.document = {
   querySelector: () => null,
   createElement: () => ({ setAttribute() {}, textContent: '' }),
   head: { appendChild: (node) => styleNodes.push(node) },
+  addEventListener: (type, fn) => { listeners.set(`${type}`, fn); },
+  removeEventListener: (type) => { listeners.delete(`${type}`); },
 };
 
 // ---- fetch stub --------------------------------------------------------------------------------------------------------
@@ -314,11 +317,56 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   tree = entry.Component(props);
   const ready = withProp(tree, 'data-dsh-widgets-brief')[0];
   assert.equal(ready.props['data-dsh-widgets-brief'], 'ready');
+  assert.equal(ready.props['aria-haspopup'], 'dialog');
   ready.props.onClick();
+  hookIndex = 0;
+  tree = entry.Component(props);
+  await runEffects();
   hookIndex = 0;
   tree = entry.Component(props);
   assert.equal(withProp(tree, 'data-dsh-widgets-brief-panel').length, 1, 'the summary can be read');
   assert.ok(texts(tree).includes('A small app.'));
+
+  // The action at the foot of the panel looks like a button, not like text.
+  const reanalyze = withProp(tree, 'data-dsh-widgets-reanalyze')[0];
+  assert.equal(reanalyze.props.className, 'dw-action', 'the action carries the bordered button class');
+  assert.equal(withProp(tree, 'data-dsh-widgets-reanalyze')[0].props.className === 'dw-btn', false);
+
+  // Clicking anywhere else closes it, and so does Escape.
+  assert.equal(typeof listeners.get('pointerdown'), 'function', 'an outside-click listener is installed while open');
+  listeners.get('pointerdown')({ target: { closest: () => null } });
+  hookIndex = 0;
+  tree = entry.Component(props);
+  assert.equal(withProp(tree, 'data-dsh-widgets-brief-panel').length, 0, 'a click outside closed the panel');
+
+  hookIndex = 0;
+  tree = entry.Component(props);
+  withProp(tree, 'data-dsh-widgets-brief')[0].props.onClick();
+  hookIndex = 0;
+  tree = entry.Component(props);
+  await runEffects();
+  hookIndex = 0;
+  tree = entry.Component(props);
+  assert.equal(withProp(tree, 'data-dsh-widgets-brief-panel').length, 1, 'reopened');
+  listeners.get('keydown')({ key: 'Escape' });
+  hookIndex = 0;
+  tree = entry.Component(props);
+  assert.equal(withProp(tree, 'data-dsh-widgets-brief-panel').length, 0, 'Escape closed the panel');
+
+  // A click inside the popover leaves it open.
+  hookIndex = 0;
+  tree = entry.Component(props);
+  withProp(tree, 'data-dsh-widgets-brief')[0].props.onClick();
+  hookIndex = 0;
+  tree = entry.Component(props);
+  await runEffects();
+  listeners.get('pointerdown')({ target: { closest: (selector) => (selector === '.dw-brief' ? {} : null) } });
+  hookIndex = 0;
+  tree = entry.Component(props);
+  assert.equal(withProp(tree, 'data-dsh-widgets-brief-panel').length, 1, 'a click inside keeps it open');
+  hookIndex = 0;
+  tree = entry.Component(props);
+  withProp(tree, 'data-dsh-widgets-brief')[0].props.onClick();
 
   // A failure offers a retry, and retrying POSTs.
   answer = () => ({ value: { status: 'failed', error: 'timed out', cwd: '/repo' } });
