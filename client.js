@@ -11,8 +11,6 @@ window.__ModuleLoader__.load({
   id: 'dsh-widgets',
   factory(require) {
     const React = require('react');
-    let primitives = {};
-    try { primitives = require('@deepseek-ai/dsh-client-ui-primitives') ?? {}; } catch { primitives = {}; }
 
     /* -------------------------------------------------------------------------------------------------------- strings */
 
@@ -689,7 +687,8 @@ window.__ModuleLoader__.load({
             const workspaces = ctx.get?.('workspaces');
             const uiWorkspace = ctx.get?.('uiWorkspace');
             const known = (workspaces?.list?.() ?? []).find((workspace) => workspace.path === value.cwd);
-            const id = known?.id ?? (await workspaces.create({ path: value.cwd }))?.workspaceId;
+            const created = known === undefined ? await workspaces.create({ path: value.cwd }) : undefined;
+            const id = known?.workspaceId ?? known?.id ?? created?.workspaceId ?? created?.id;
             if (id !== undefined) uiWorkspace?.startSession?.(id);
           } catch { /* the folder is in the picker on the next try */ }
         };
