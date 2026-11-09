@@ -1,4 +1,4 @@
-import { closeSync, constants as fsConstants, openSync, readSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, constants as fsConstants, openSync, readdirSync, readSync, realpathSync, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 
 /** How much of one file the project brief keeps. */
@@ -37,13 +37,34 @@ export function readInside(dir: string, name: string, maxBytes = BRIEF_FILE_MAX)
 
 /** A short, read-only description of the project for the Improve prompt call. */
 export function projectBrief(dir: string, maxPerFile = BRIEF_FILE_MAX): string {
-  return ['AGENTS.md', 'README.md', 'package.json']
+  const documents = ['AGENTS.md', 'README.md', 'package.json']
     .map((entry) => {
       const text = readInside(dir, entry, maxPerFile);
       return text === undefined || text.trim() === '' ? undefined : `<${entry}>\n${text.trim()}\n</${entry}>`;
     })
     .filter((part): part is string => part !== undefined)
     .join('\n\n');
+  if (documents !== '') return documents;
+
+  // A project is not always documented at its own root: a workspace of repositories, a folder whose README lives one level
+  // down. Naming what is there is weak material, but it is real, and far better than calling the project unreadable.
+  const listing = projectListing(dir);
+  return listing.length === 0 ? '' : `<listing>\n${listing.join('\n')}\n</listing>`;
+}
+
+/** The names at the top of a project, for a folder that carries no document of its own. */
+export function projectListing(dir: string, max = 40): string[] {
+  let entries: { name: string; isDirectory(): boolean }[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true }) as unknown as { name: string; isDirectory(): boolean }[];
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.name !== '' && !entry.name.startsWith('.') && entry.name !== 'node_modules')
+    .slice(0, max)
+    .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
+    .sort();
 }
 
 export const improveInputOk = (text: unknown): text is string =>

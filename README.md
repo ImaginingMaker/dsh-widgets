@@ -159,7 +159,8 @@ composer.
 **Off by default.** Switch it on and the first task in a project opens with a short summary of that project.
 
 One quiet model call reads the same three files the plugin already trusts — `AGENTS.md`, `README.md`, `package.json` —
-and writes at most **500 characters**: what the project is and its stack, how to run it and its tests, what those files
+and, for a folder that documents nothing at its own root (a workspace of repositories, say), a plain listing of what is
+there. It writes at most **500 characters**: what the project is and its stack, how to run it and its tests, what those files
 require of someone making changes, and the traps to avoid. The summary becomes the first thing the task is told.
 
 - **It never waits.** A read in flight is not waited for: if you send before it finishes, the task simply goes without the
@@ -167,8 +168,9 @@ require of someone making changes, and the traps to avoid. The summary becomes t
 - **One read per project**, keyed by its real path and a fingerprint of `HEAD` plus the files' size and mtime. A summary
   made from an older state of the project is rebuilt on the next task; an unchanged one is reused, so the model is not
   called again.
-- **The composer shows it**: a spinner while reading, a dot when ready (its tooltip is the summary), and a warning with a
-  reason and a retry when it failed. Switching the widget off removes the icon and stops every read.
+- **The composer shows it**: a spinner while reading, a dot when ready (its tooltip is the summary), and a warning dot
+  when it failed — its tooltip carries the reason, and a click tries again. Nothing is written into the composer, and a
+  folder with nothing in it shows nothing at all. Switching the widget off removes the icon and stops every read.
 - It costs one model call per project change, not per chat.
 
 ---

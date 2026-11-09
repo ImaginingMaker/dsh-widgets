@@ -76,7 +76,8 @@ export function BriefStatus({ sessionId, t, notify }: BriefStatusProps): React.R
   return React.createElement('span', { className: 'dw-brief', style: { position: 'relative' } },
     React.createElement('button', {
       type: 'button', className: 'dw-btn', 'data-dsh-widgets-brief': view.status,
-      title: label, 'aria-label': label, 'aria-busy': view.status === 'analyzing',
+      title: view.status === 'failed' ? `${label} — ${t('brief.retry')}` : label,
+      'aria-label': label, 'aria-busy': view.status === 'analyzing',
       onClick: () => {
         if (view.status === 'failed') { void ask(true); return; }
         setOpen(!open);
@@ -94,7 +95,5 @@ export function BriefStatus({ sessionId, t, notify }: BriefStatusProps): React.R
           onClick: () => { setOpen(false); void ask(true); },
         }, t('brief.reanalyze')))
       : null,
-    view.status === 'failed'
-      ? React.createElement('span', { role: 'alert', style: { fontSize: 11 } }, t('brief.retry'))
-      : null);
+  );
 }

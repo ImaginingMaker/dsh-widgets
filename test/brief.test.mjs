@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BRIEF_MAX, briefPrompt, briefSignature, briefStore, briefRunner, clipBrief } from '../dist/index.js';
+import { BRIEF_MAX, briefPrompt, briefSignature, briefStore, briefRunner, clipBrief, projectBrief, projectListing } from '../dist/index.js';
 import { tempDir } from './helpers.mjs';
 
 // ---- the prompt --------------------------------------------------------------------------------------------------------
@@ -36,6 +36,27 @@ assert.notEqual(
   briefSignature({ head: 'abc', files: [{ name: 'README.md', size: 2, mtimeMs: 10 }] }),
   'a changed file changes it',
 );
+
+// ---- a project with no document of its own -----------------------------------------------------------------------------
+{
+  // A workspace of repositories has no README at its own root; its listing is still real material.
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const home2 = tempDir();
+  try {
+    const workspace = join(home2.dir, 'workspace');
+    mkdirSync(join(workspace, 'repo-a'), { recursive: true });
+    mkdirSync(join(workspace, 'repo-b'), { recursive: true });
+    mkdirSync(join(workspace, 'node_modules'), { recursive: true });
+    writeFileSync(join(workspace, '.hidden'), 'x');
+    assert.deepEqual(projectListing(workspace), ['repo-a/', 'repo-b/'], 'hidden and node_modules are left out');
+    assert.match(projectBrief(workspace), /<listing>\nrepo-a\/\nrepo-b\/\n<\/listing>/);
+
+    // A folder with nothing in it is not material at all.
+    mkdirSync(join(home2.dir, 'empty'), { recursive: true });
+    assert.deepEqual(projectListing(join(home2.dir, 'empty')), []);
+    assert.equal(projectBrief(join(home2.dir, 'empty')), '');
+  } finally { home2.cleanup(); }
+}
 
 // ---- the store ---------------------------------------------------------------------------------------------------------
 const home = tempDir();
@@ -112,7 +133,7 @@ try {
   const forced = await failing.ensure('/q', true);
   assert.equal(forced.started, true);
 
-  // No material is a quiet failure, not a model call.
+  // A folder with nothing in it is idle, not a failure: there is nothing to summarise and nothing to show the user.
   let emptyCalls = 0;
   const empty = briefRunner({
     store: briefStore(join(home.dir, 'b3.json')),
@@ -120,10 +141,10 @@ try {
     material: () => '   ',
     complete: async () => { emptyCalls += 1; return { text: 'x', model: 'p/m' }; },
   });
-  await empty.ensure('/e');
-  const emptyRecord = await empty.settled('/e');
-  assert.equal(emptyRecord.status, 'failed');
-  assert.match(emptyRecord.error, /no AGENTS\.md/);
+  const started = await empty.ensure('/e');
+  assert.equal(started.record.status, 'analyzing');
+  // Nothing is written at all: an empty folder leaves no record, which the route reports as `idle`.
+  assert.equal(await empty.settled('/e'), undefined);
   assert.equal(emptyCalls, 0, 'nothing to read means no model call');
 
   // An empty answer is a failure, never a summary of nothing.

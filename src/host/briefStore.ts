@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { briefSignature } from '../shared/brief.js';
 import type { BriefStatus } from '../shared/types.js';
 import type { SubprocessService } from './context.js';
-import { projectBrief } from './files.js';
+import { projectBrief, projectListing } from './files.js';
 import { runGit } from './git.js';
 
 export interface BriefRecord {
@@ -85,6 +85,8 @@ export async function signatureOf(subprocess: SubprocessService, dir: string): P
     const result = await runGit(subprocess, dir, ['rev-parse', 'HEAD']);
     if (result.code === 0) head = result.stdout.trim();
   } catch { /* not a repository: the files alone decide */ }
+  // A project with no document of its own is summarised from its listing, so the listing is part of what the summary was
+  // made from: a new folder in such a project invalidates the old summary instead of reusing it for ever.
   const files = chunks.flatMap((name) => {
     try {
       const path = join(dir, name);
@@ -95,6 +97,10 @@ export async function signatureOf(subprocess: SubprocessService, dir: string): P
       return [];
     }
   });
+  if (files.length === 0) {
+    const listing = projectListing(dir);
+    return `${briefSignature({ head, files })}@${listing.join(',')}`;
+  }
   return briefSignature({ head, files });
 }
 
@@ -126,10 +132,8 @@ export function briefRunner(deps: {
 
     const material = deps.material(dir);
     if (material.trim() === '') {
-      // Nothing to read is not an error the user has to see: it just means no summary is worth injecting.
-      const empty: BriefRecord = { status: 'failed', error: 'this project has no AGENTS.md, README.md or package.json', signature, at: Date.now() };
-      await deps.store.set(dir, empty);
-      return empty;
+      // An empty folder is not a failure to report: there is simply nothing to summarise, and nothing to inject.
+      return { status: 'idle', signature, at: Date.now() };
     }
 
     const timeout = AbortSignal.timeout(deps.timeoutMs ?? BRIEF_TIMEOUT_MS);
