@@ -58,8 +58,9 @@ Alt, Ctrl and Meta are not intercepted, a repeated key and an IME composition ar
 
 ### Queue drag-and-drop
 
-Queued messages appear as a strip above the composer, one row each, with a grip. Drag a row onto another to reorder, or
-focus the grip and press `↑` / `↓`. `Esc` ends a drag.
+Queued messages appear as a strip above the composer while the agent is running, one row each, with a grip. Drag a row
+onto another to reorder, or focus the grip and press `↑` / `↓`. `Esc` ends a drag. A single queued message still shows,
+so it can be edited; the grip and the arrows appear once there are at least two rows to reorder.
 
 Only your own messages move: a goal round or a question reply in the range keeps its place. The move goes through the
 Host, so a message keeps its images and files. If the queue changed since you looked — a message started sending — the
@@ -376,8 +377,9 @@ dsh plugin --profile web add dsh-widgets
 空格、制表符或行尾）；`/planning` 不会被误判。只改前缀，草稿其余内容、文件 chip 与附件保持不变，光标移到末尾。
 已在计划模式时，Shift+Tab 通过 dsh 自己的 `/plan off` 退出。Alt / Ctrl / Meta 不拦截，长按重复与输入法组合会被忽略。
 
-**队列拖拽排序** —— 输入框上方每条队列消息带一个手柄，拖到另一条上即可换位，或聚焦手柄后按 `↑` / `↓`，`Esc` 结束。
-只有你自己的消息能移动（目标轮次、提问回复保持原位）。移动经 Host 处理，因此图片与文件会跟着消息走；
+**队列拖拽排序** —— 会话运行中排队的消息会在输入框上方列成一条，每条带一个手柄，拖到另一条上即可换位，或聚焦手柄后按 `↑` / `↓`，`Esc` 结束。
+只有一条排队消息时队列条依然显示（可以就地编辑），有两条以上时才出现手柄与箭头；只有你自己的消息能移动（目标轮次、提问回复保持原位）。
+移动经 Host 处理，因此图片与文件会跟着消息走；
 若队列在你查看之后发生了变化，移动会被拒绝，而不是作用到错的行上。
 
 **就地编辑队列消息** —— 双击（或点 **编辑**）在发送前修改文字。`Enter` 保存、`Esc` 取消、`Shift+Enter` 换行。

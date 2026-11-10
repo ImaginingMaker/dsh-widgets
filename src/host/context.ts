@@ -121,7 +121,7 @@ export interface InboxMessage {
 export interface Inbox {
   readonly nextTurn?: readonly InboxMessage[];
   splice?(target: string, start: number, count: number, inserted: readonly InboxMessage[]): unknown;
-  replace?(id: string, content: readonly unknown[]): boolean | undefined;
+  replace?(id: string, message: InboxMessage): boolean | undefined;
 }
 
 export interface Agent {

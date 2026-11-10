@@ -133,7 +133,9 @@ export function installQueueEdit(ctx: HostContext, busy = new Set<string>()): vo
           return json({ error: 'this dsh build cannot add images to a queued message: send it instead' }, 409);
         }
 
-        const replaced = inbox.replace(itemId, blocks);
+        // dsh's Inbox.replace takes a whole message, not just its content: give the old one back with the new blocks,
+        // so id, source and place survive. Passing the blocks alone replaces the message with an id-less fragment.
+        const replaced = inbox.replace(itemId, { ...message, content: blocks as InboxMessage['content'] });
         if (replaced === false) return gone();
         const edited = inbox.nextTurn.find((item) => item.id === itemId) ?? message;
         return json({ edited: true, seen: seenOf(edited.content as QueueBlock[]) });

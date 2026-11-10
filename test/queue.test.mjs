@@ -58,10 +58,10 @@ function makeInbox(initial) {
     get nextTurn() { return queue; },
     splices,
     splice(target, start, count, inserted) { splices.push({ target, start, count, ids: inserted.map((item) => item.id) }); queue.splice(start, count, ...inserted); },
-    replace(id, content) {
+    replace(id, next) {
       const index = queue.findIndex((item) => item.id === id);
       if (index === -1) return false;
-      queue[index] = { ...queue[index], content };
+      queue[index] = next;
       return true;
     },
     set(next) { queue = next; },
@@ -159,6 +159,9 @@ function wire(inbox, extra = {}) {
   assert.deepEqual(edited.json, { edited: true, seen: [['text', 'new words']] });
   assert.deepEqual(inbox.nextTurn.map((item) => item.id), ['a', 'b', 'c'], 'the message keeps its place');
   assert.equal(inbox.nextTurn[1].content[0].text, 'new words');
+  // dsh's replace takes a whole message; a bare content array would leave an id-less fragment in the queue.
+  assert.equal(inbox.nextTurn[1].id, 'b');
+  assert.deepEqual(inbox.nextTurn[1].source, { kind: 'user' });
   home.cleanup();
 }
 

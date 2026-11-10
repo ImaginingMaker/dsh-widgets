@@ -39,12 +39,21 @@ export interface QueuePanelProps extends QueueProps {
   readonly settings: SettingsView | { readonly on?: Record<string, boolean> };
 }
 
+/** dsh's inbox projection, of which this strip reads the pending turns. */
+interface InboxProjection {
+  readonly 'next-turn'?: readonly QueuedRow[];
+}
+
 /**
  * The queue strip: one row per queued message with a drag grip and the arrow keys. Both switches show the same strip;
  * each one only adds its own affordance, so turning one off leaves the other working.
+ *
+ * The queue is `inbox['next-turn']` in dsh's projection store, not a projection of its own: `useProjection` addresses
+ * whole projection values by key, so asking it for `next-turn` returns undefined and the strip never appears.
  */
 export function QueuePanel({ sessionId, useProjection, settings, notify, t }: QueuePanelProps): React.ReactElement | null {
-  const queue = useProjection('next-turn') as readonly QueuedRow[] | undefined;
+  const inbox = useProjection('inbox') as unknown as InboxProjection | undefined;
+  const queue = inbox?.['next-turn'];
   const rows = Array.isArray(queue) ? queue : [];
   const reorderOn = isOn(settings as SettingsView, 'queueReorder');
   const editOn = isOn(settings as SettingsView, 'queueEdit');
@@ -56,7 +65,11 @@ export function QueuePanel({ sessionId, useProjection, settings, notify, t }: Qu
   const [busy, setBusy] = React.useState(false);
 
   if (!reorderOn && !editOn) return null;
-  if (rows.length < 2 && editing === null) return null;
+  // One queued message still needs the strip when it is yours: its edit is what the second switch offers. With nothing
+  // queued there is no row to act on, and a lone row nobody can edit or move would only duplicate dsh's own queue.
+  const reorderable = rows.length > 1;
+  const hasOwn = rows.some(ownMessage);
+  if (!(editOn && hasOwn) && !(reorderOn && reorderable && hasOwn)) return null;
 
   const before = rows.map((message) => message.id);
   const api = queueApi(sessionId, before);
@@ -131,7 +144,7 @@ export function QueuePanel({ sessionId, useProjection, settings, notify, t }: Qu
             void move(rows[from].id, index);
           },
         },
-        reorderOn && mine
+        reorderOn && reorderable && mine
           ? React.createElement('button', {
             type: 'button',
             className: 'dw-grip',
@@ -169,7 +182,7 @@ export function QueuePanel({ sessionId, useProjection, settings, notify, t }: Qu
             title: rowText(message),
             onDoubleClick: () => { if (!editOn || !mine) return; setEditing(message.id); setDraftText(rowText(message)); },
           }, rowText(message)),
-        reorderOn && mine
+        reorderOn && reorderable && mine
           ? React.createElement('span', { className: 'dw-arrows' },
             React.createElement('button', {
               type: 'button', className: 'dw-btn', disabled: busy || index === 0, 'aria-label': t('queue.moveUp'),

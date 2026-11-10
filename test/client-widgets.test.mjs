@@ -96,7 +96,14 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   assert.equal(entry.options.name, 'conversation.input.dock');
   const render = (rows, settings = { on: {} }, notify = () => {}) => {
     hookIndex = 0;
-    const element = entry.Component({ sessionId: 's1', useProjection: () => rows, notify, t: (key) => key });
+    // dsh's projection store is key-addressed: the queue lives under `inbox['next-turn']`, so an implementation that
+    // asks for `next-turn` directly gets nothing and this fake fails the way the real app did.
+    const element = entry.Component({
+      sessionId: 's1',
+      useProjection: (name) => (name === 'inbox' ? { 'next-turn': rows } : undefined),
+      notify,
+      t: (key) => key,
+    });
     return element.type({ ...element.props, settings });
   };
   const rows = [
@@ -182,8 +189,16 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
     assert.ok(labels.includes('queue.moveDown'));
   }
 
+  // One queued message still gets the strip, because that is the only row its edit switch can act on; there is simply
+  // nothing to reorder yet, so no grip and no arrows.
   resetHooks();
-  assert.equal(render(rows.slice(0, 1)), null, 'one row is not worth a strip');
+  const single = render(rows.slice(0, 1));
+  assert.equal(withProp(single, 'data-dsh-widgets-queue').length, 1, 'a single queued message still shows the strip');
+  assert.equal(withProp(single, 'data-dsh-widgets-grip').length, 0, 'one row has nothing to reorder');
+  assert.equal(withProp(single, 'data-dsh-widgets-edit-open').length, 1, 'and its edit is reachable');
+  assert.equal(render([]), null, 'an empty queue has no strip');
+  assert.equal(render([rows[2]]), null, 'a lone message that is not yours has nothing to act on');
+  assert.equal(render(rows.slice(0, 1), { on: { queueEdit: false } }), null, 'one row with editing off has nothing to reorder');
   assert.equal(render(rows, { on: { queueReorder: false, queueEdit: false } }), null);
 }
 
