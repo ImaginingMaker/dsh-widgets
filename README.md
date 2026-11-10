@@ -161,9 +161,15 @@ session's task history, to restate the project and plan, and to continue expandi
 **The handoff follows the language of the conversation, not the UI.** A Chinese conversation produces a Chinese handoff,
 an English conversation an English one, even when Settings → Widgets is pinned to the other language. Code, file paths,
 commands and proper nouns stay verbatim. Other languages use the English template with an explicit "keep the user's
-language" rule, so the handoff itself can stay in that language. The detector reads the last eight user messages, ignores
+language" rule, so the handoff itself can stay in that language. The detector reads the last eight of the user's own messages, ignores
 code blocks, inline code and URLs, and follows the most recent natural-language message (the session title is only a
-fallback). For a Chinese conversation the Host also verifies that the generated note really is Chinese; a non-Chinese
+fallback). Only the human counts: the harness's own narration — time samples, runtime-context snapshots, the skill
+catalogue, mode notices — is not the user's language and never decides the handoff language.
+
+The transcript is bounded at 24k characters, and part of that budget is reserved for the human's most recent messages: in
+a long turn the tail is all assistant and tool text, and the task statement itself must not fall out of it. The new
+session's title reuses the old session title with any existing `Handoff —` / `交接 —` prefix removed, so handing off a
+handoff does not stack prefixes. For a Chinese conversation the Host also verifies that the generated note really is Chinese; a non-Chinese
 answer is retried once with a corrective prompt, and a second failure is reported instead of sending the wrong language.
 
 The handoff is never written into the project. It is generated in memory and may be mirrored to a system temporary file
@@ -174,6 +180,34 @@ verify the current state first.
 If the project has no registered workspace, the new session is created with the same cwd instead, so it still inherits the
 project. The plugin then switches to the new session automatically; if navigation is unavailable, it reports the new
 session id rather than losing it.
+
+**The handoff outlives the page that started it.** The Host owns the job, so switching to another session — or closing the
+tab — stops only the waiting, not the work. Coming back finds the remembered state: still running (with the seconds so
+far, polled until it lands), finished (a pill that opens the new session with one press, and a × that forgets it so the
+icon starts a new handoff), or failed (with its reason, ready to retry). The state lives in
+`storages/dsh-widgets/handoffs.json` under the dsh home, so it also survives a reload; a `running` record whose process is
+gone is reported as interrupted instead of polling forever. A second click while a handoff already runs joins it: one
+model call, one new session.
+
+#### Where the time goes
+
+One click does five things: read the durable history, turn it into the bounded transcript, resolve the analysis model,
+stream one model call for the note, then create the session and send the prompt. The model call is the whole cost. Measured
+in the real-app harness (which holds the fake provider for a known delay): history read 2 ms, route and call preparation
+1 ms, session creation 21 ms, prompt 1 ms — everything except the note itself is milliseconds.
+
+Real sessions are the same shape. The generated notes in this project's own session logs came out at roughly 1,500–2,000
+output tokens (3.9k–7.5k characters), and the analysis endpoint streams at about 30 tokens per second, which is where the
+55–75 seconds between the last event of the handed-off session and the new session's creation came from.
+
+What was deliberately **not** traded for speed: the 4,000-token output ceiling, the full seven-section prompt, the model's
+own reasoning default, and the 24k-character transcript. They are the quality knobs, and shortening any of them shortens
+the handoff. What did get cheaper is only the work around the model: the agent is resolved once instead of twice, the
+history read, title, route and call preparation all start before the model is needed, and the corrective Chinese retry
+accepts `###`, bold and numbered headings — a heading written differently no longer buys a whole second generation.
+
+The finished pill shows the wall time, and the record in `handoffs.json` carries the breakdown (`readMs`, `prepareMs`,
+`modelMs`, `repairMs`, `createMs`, `promptMs`, plus token counts and the effort that was sent).
 
 ## Settings
 
@@ -363,13 +397,40 @@ dsh plugin --profile web add dsh-widgets
 
 **交接正文跟随会话语言，而不是界面语言。** 中文会话生成中文交接，英文会话生成英文交接；即使 Settings → Widgets
 固定为另一种语言也不会改变。代码、文件路径、命令和专有名词保留原文。其他语言使用英文模板并明确要求模型保持用户
-原语言。检测会读取最近 8 条用户消息，忽略代码块、行内代码和 URL，并以最近一条自然语言消息为准（会话标题只作兜底）。
+原语言。检测会读取最近 8 条**用户本人**的消息，忽略代码块、行内代码和 URL，并以最近一条自然语言消息为准（会话标题只作兜底）。
+harness 自己的叙述——时间戳、运行时快照、技能目录、模式通知——不算用户语言，也不会决定交接语言；同样地，它们也不会进入
+transcript（交接素材只由人说的话、助手回复和工具调用构成）。
+
+transcript 上限 24k 字符，其中会**为人类最近的消息预留一段配额**：长回合的尾部全是助手与工具文本，用户自己说的任务
+不能因此被挤出去。新会话标题复用源会话标题，但会先剥掉已有的 `交接 —` / `Handoff —` 前缀，避免「交接 — 交接 — …」。
 中文会话还会检查生成结果是否真的是中文；不是则用修正提示重试一次，仍失败会明确报错，而不是把错误语言的交接发给
 新会话。
 
 交接内容不会写入项目：它在内存中生成，创建新会话期间可能写入系统临时文件，消息被接受后立即删除。只汇总已提交的
 会话历史；如果当前回合仍在运行，未提交的文字不会被包含，新会话会先核对当前状态。项目没有注册 workspace 时，用
 相同 cwd 创建新会话，仍然继承项目信息。创建后自动切换到新会话；导航不可用时提示新会话 id，不会丢失。
+
+**交接比页面活得久。** 任务归 Host 所有：切到别的会话、关掉标签页，停下的只是等待，不是工作。回到原会话能看到记住的
+状态——仍在进行（显示已用秒数，并持续轮询到结束）、已完成（一颗胶囊按钮，一按即打开新会话；旁边的 × 清除记录，
+图标恢复成可以再次交接）、或失败（带原因，可直接重试）。状态写在 dsh 主目录的
+`storages/dsh-widgets/handoffs.json`，刷新页面同样能恢复；若记录里的进程已经不在了，会报告为「被中断」，而不是
+一直转圈。交接还在跑时再点一次会并入同一个任务：一次模型调用、一个新会话。
+
+#### 时间花在哪
+
+一次点击做五件事：读取已提交的会话历史、拼成有上限的 transcript、解析分析模型、流式生成交接正文，然后创建会话并
+发送第一条消息。**耗时几乎全部在模型生成这一步。** 在真实应用测试环境里（把假 provider 按住固定时长）测到：读历史
+2 ms、解析与准备 1 ms、创建会话 21 ms、发送提示词 1 ms——除正文以外的一切都是毫秒级。
+
+真实会话也是同样的形状：从本项目自己的会话日志里取出三次真实交接，正文约 1,500–2,000 个输出 token（3.9k–7.5k 字符），
+而分析端点大约每秒吐 30 个 token，这正是「源会话最后一个事件 → 新会话创建」之间 55–75 秒的来源。
+
+**没有**为了速度牺牲的东西：4,000 token 的输出上限、完整的七个小节提示词、模型自己的推理默认档、24k 字符的 transcript。
+它们就是质量旋钮，任何一个变短，交接都会变短。真正变便宜的只有模型周边的工作：agent 只解析一次（原来两次）、读历史/
+取标题/选路/准备调用都提前并发启动、中文修正重试现在接受 `###`、加粗和带编号的标题——标题写法不同不再换来一整份二次生成。
+
+完成后的胶囊会显示总耗时，`handoffs.json` 里的记录还带着分阶段明细（`readMs`、`prepareMs`、`modelMs`、`repairMs`、
+`createMs`、`promptMs`，以及 token 数与实际发送的 effort）。
 
 **推理档位来自你自己的模型配置，不是写死的清单。** dsh 的模型配置里每个模型可以声明：
 
