@@ -161,9 +161,10 @@ session's task history, to restate the project and plan, and to continue expandi
 **The handoff follows the language of the conversation, not the UI.** A Chinese conversation produces a Chinese handoff,
 an English conversation an English one, even when Settings → Widgets is pinned to the other language. Code, file paths,
 commands and proper nouns stay verbatim. Other languages use the English template with an explicit "keep the user's
-language" rule, so the handoff itself can stay in that language. For a Chinese conversation the Host also verifies that
-the generated note really is Chinese; a non-Chinese answer is retried once with a corrective prompt, and a second failure
-is reported instead of sending the wrong language.
+language" rule, so the handoff itself can stay in that language. The detector reads the last eight user messages, ignores
+code blocks, inline code and URLs, and follows the most recent natural-language message (the session title is only a
+fallback). For a Chinese conversation the Host also verifies that the generated note really is Chinese; a non-Chinese
+answer is retried once with a corrective prompt, and a second failure is reported instead of sending the wrong language.
 
 The handoff is never written into the project. It is generated in memory and may be mirrored to a system temporary file
 while the new session is created; that file is deleted once the prompt is accepted. Only durable, committed session
@@ -362,8 +363,9 @@ dsh plugin --profile web add dsh-widgets
 
 **交接正文跟随会话语言，而不是界面语言。** 中文会话生成中文交接，英文会话生成英文交接；即使 Settings → Widgets
 固定为另一种语言也不会改变。代码、文件路径、命令和专有名词保留原文。其他语言使用英文模板并明确要求模型保持用户
-原语言。中文会话还会检查生成结果是否真的是中文；不是则用修正提示重试一次，仍失败会明确报错，而不是把错误语言的
-交接发给新会话。
+原语言。检测会读取最近 8 条用户消息，忽略代码块、行内代码和 URL，并以最近一条自然语言消息为准（会话标题只作兜底）。
+中文会话还会检查生成结果是否真的是中文；不是则用修正提示重试一次，仍失败会明确报错，而不是把错误语言的交接发给
+新会话。
 
 交接内容不会写入项目：它在内存中生成，创建新会话期间可能写入系统临时文件，消息被接受后立即删除。只汇总已提交的
 会话历史；如果当前回合仍在运行，未提交的文字不会被包含，新会话会先核对当前状态。项目没有注册 workspace 时，用
