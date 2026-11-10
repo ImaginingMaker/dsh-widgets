@@ -79,7 +79,7 @@ export { installSettings } from './routes/settings.js';
 export { installModels } from './routes/models.js';
 export { installImprove, IMPROVE_MAX_TOKENS } from './routes/improve.js';
 export { installHandoff } from './routes/handoff.js';
-export { detectHandoffLanguage, handoffSystem, handoffTranscript, handoffSummaryPrompt, handoffContinuation, handoffTitle } from './handoff.js';
+export { detectHandoffLanguage, handoffLanguageOk, handoffLanguageRepairPrompt, handoffSystem, handoffTranscript, handoffSummaryPrompt, handoffContinuation, handoffTitle } from './handoff.js';
 export { installQueueMove, installQueueEdit } from './routes/queue.js';
 export { installBrief, analysisRoute, BRIEF_MAX_TOKENS } from './routes/brief.js';
 export { installPlan, PLAN_LINES } from './routes/plan.js';

@@ -27,7 +27,7 @@ if (!existsSync(dshBin)) throw new Error(`no dsh CLI at ${dshBin}; run npm insta
 // ---- a fake model, so no real provider is called ------------------------------------------------------------
 const bodies = [];
 const SUMMARY = 'acme-web is a small demo app. Run the tests with npm test.';
-const HANDOFF_SUMMARY = '上个会话已完成登录页草稿的改写；下一步运行测试并继续拓展计划。';
+const HANDOFF_SUMMARY = '## 项目与目标\n完成登录页草稿的改写。\n\n## 当前计划与下一步\n运行测试并继续拓展计划。\n\n## 继续工作的验收条件\n测试通过。';
 const fake = createServer((req, res) => {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
@@ -403,14 +403,15 @@ try {
   }
   const continuation = bodies.find((body) => body.includes('You are taking over from another session') || body.includes('你正在接手上一个会话'));
   assert.ok(continuation, 'the new session received the continuation prompt');
-  assert.ok(continuation.includes(HANDOFF_SUMMARY), 'the generated handoff traveled to the new session');
+  assert.ok(continuation.includes('完成登录页草稿'), 'the generated handoff traveled to the new session');
   assert.ok(continuation.includes(project), 'the new session was told the project path');
   assert.match(continuation, /Continue expanding the plan|继续拓展计划/);
   const summaryRequest = bodies.find((body) => body.includes('交接说明'));
   assert.ok(summaryRequest?.includes('## 当前计划与下一步'), 'the Chinese session asked for a Chinese handoff');
   assert.ok(summaryRequest?.includes('必须使用中文'), 'the handoff language followed the session, not the UI');
   assert.equal(existsSync(join(project, 'HANDOFF.md')), false, 'the project was not written to');
-  step('the Handoff icon creates a same-project session and sends the plan-continuation prompt');
+  await page.waitForFunction(() => document.body.innerText.includes('交接 —'), null, { timeout: 15_000 });
+  step('the Handoff icon creates and switches to a same-project session with the plan-continuation prompt');
 
   assert.deepEqual(pageErrors, [], 'no page error');
   console.log(`dsh ${dshBin}\n${results.join('\n')}`);

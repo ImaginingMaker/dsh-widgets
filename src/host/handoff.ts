@@ -247,6 +247,38 @@ export function handoffContinuation(summary: string, meta: HandoffMeta, language
   ].join('\n');
 }
 
+const CHINESE_HEADING = /^##\s*(?:项目与目标|当前计划与下一步|已完成的工作)/m;
+
+/** Whether a generated handoff actually uses the target language. English is not hard-failed because it also carries other languages. */
+export const handoffLanguageOk = (text: string, language: HandoffLanguage): boolean => {
+  if (text.trim() === '') return false;
+  if (language !== 'zh') return true;
+  return count(text, CJK) >= 20 && CHINESE_HEADING.test(text);
+};
+
+/** One corrective instruction used when a Chinese session produced a non-Chinese handoff. */
+export const handoffLanguageRepairPrompt = (previous: string, language: HandoffLanguage): string => {
+  if (language === 'zh') {
+    return [
+      '上一份交接没有使用中文。请保持以下交接的事实、结构、代码、路径和命令原文，用中文重写。',
+      '仍然必须包含以下小节：## 项目与目标、## 当前状态、## 已完成的工作、## 关键决策与约束、## 当前计划与下一步、## 风险、未验证项与待确认问题、## 继续工作的验收条件。',
+      '不要添加新事实。只输出重写后的交接，不要解释。',
+      '',
+      '<previous>',
+      clip(previous.trim(), HANDOFF_SUMMARY_MAX),
+      '</previous>',
+    ].join('\n');
+  }
+  return [
+    'The previous handoff did not use the session language. Keep its facts, structure, code, paths and commands, and rewrite it in the same natural language as the user\'s messages.',
+    'Keep the seven sections. Do not add new facts. Return the rewritten handoff only.',
+    '',
+    '<previous>',
+    clip(previous.trim(), HANDOFF_SUMMARY_MAX),
+    '</previous>',
+  ].join('\n');
+};
+
 /** A stable display title for the new session, derived from the old session and project. */
 export const handoffTitle = (meta: HandoffMeta, language: HandoffLanguage = 'en'): string => {
   const prefix = language === 'zh' ? '交接' : 'Handoff';

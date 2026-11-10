@@ -10,8 +10,8 @@ import type {
 } from '../context.js';
 import { json, service } from '../context.js';
 import {
-  detectHandoffLanguage, handoffContinuation, handoffSummaryPrompt, handoffSystem, handoffTitle, handoffTranscript,
-  planActiveOf, HANDOFF_MAX_TOKENS, HANDOFF_TIMEOUT_MS,
+  detectHandoffLanguage, handoffContinuation, handoffLanguageOk, handoffLanguageRepairPrompt, handoffSummaryPrompt,
+  handoffSystem, handoffTitle, handoffTranscript, planActiveOf, HANDOFF_MAX_TOKENS, HANDOFF_TIMEOUT_MS,
 } from '../handoff.js';
 import type { HandoffMeta } from '../handoff.js';
 import { projectDirOf } from '../project.js';
@@ -118,9 +118,20 @@ export function installHandoff(ctx: HostContext, home: string): void {
         const summary = await collect(prepared, handoffSystem(language), handoffSummaryPrompt(meta, transcript, language), timed);
         if (summary === '') return json({ error: 'the model gave no handoff text' }, 502);
 
+        // A Chinese session must not receive an English handoff. Retry once with a corrective prompt; English is left
+        // permissive because the English template also carries other session languages.
+        let handoff = summary;
+        if (!handoffLanguageOk(handoff, language)) {
+          const repaired = await llm.prepareCall({ ...route, ...controls, maxTokens: HANDOFF_MAX_TOKENS }, timed);
+          handoff = await collect(repaired, handoffSystem(language), handoffLanguageRepairPrompt(summary, language), timed);
+          if (!handoffLanguageOk(handoff, language)) {
+            return json({ error: 'the model did not return a Chinese handoff' }, 502);
+          }
+        }
+
         // A system temporary file, never a project file. It is deleted after the prompt is sent.
         const temp = join(tmpdir(), `dsh-widgets-handoff-${randomUUID()}.md`);
-        try { writeFileSync(temp, `${summary}\n`, { mode: 0o600 }); tempFile = temp; } catch { /* the note is in memory */ }
+        try { writeFileSync(temp, `${handoff}\n`, { mode: 0o600 }); tempFile = temp; } catch { /* the note is in memory */ }
 
         const newSession = registry !== undefined && workspace !== undefined
           ? await sessionController.create({ workspaceId: workspace.id })
@@ -130,7 +141,7 @@ export function installHandoff(ctx: HostContext, home: string): void {
           await sessionController.rename({ sessionId: created, title: handoffTitle(meta, language) }).catch(() => undefined);
         }
 
-        const continuation = handoffContinuation(summary, meta, language);
+        const continuation = handoffContinuation(handoff, meta, language);
         await sessionController.prompt({
           requestId: randomUUID(),
           sessionId: created,
@@ -140,7 +151,7 @@ export function installHandoff(ctx: HostContext, home: string): void {
 
         const result: HandoffResult = {
           sessionId: created,
-          handoff: summary,
+          handoff,
           project: {
             cwd: dir,
             ...(workspace === undefined ? {} : { workspaceId: workspace.id }),
