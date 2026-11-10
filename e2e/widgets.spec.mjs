@@ -27,6 +27,7 @@ if (!existsSync(dshBin)) throw new Error(`no dsh CLI at ${dshBin}; run npm insta
 // ---- a fake model, so no real provider is called ------------------------------------------------------------
 const bodies = [];
 const SUMMARY = 'acme-web is a small demo app. Run the tests with npm test.';
+const HANDOFF_SUMMARY = '上个会话已完成登录页草稿的改写；下一步运行测试并继续拓展计划。';
 const fake = createServer((req, res) => {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
@@ -40,6 +41,7 @@ const fake = createServer((req, res) => {
     // A project summary is asked for by the brief prompt; everything else is an ordinary reply.
     // The plugin asks in the language it was pinned to, so the summary request is recognised in either language.
     const wantsSummary = /preparing context for a coding task|准备项目背景/.test(body);
+    const wantsHandoff = /preparing a handoff note|交接说明/.test(body);
     // The Improve prompt call is held open for a moment, so the test can see what the composer does while it runs.
     const wantsRewrite = /You rewrite a developer's rough draft/.test(body);
     const delay = wantsRewrite ? 1800 : 0;
@@ -48,7 +50,7 @@ const fake = createServer((req, res) => {
       choices: [{ index: 0, delta, finish_reason: finish ?? null }],
       ...(finish ? { usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } } : {}),
     })}\n\n`;
-    const text = wantsSummary ? SUMMARY : 'Sure — here is the plan.';
+    const text = wantsHandoff ? HANDOFF_SUMMARY : wantsSummary ? SUMMARY : 'Sure — here is the plan.';
     const send = () => {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.end(chunk({ role: 'assistant', content: text }) + chunk({}, 'stop') + 'data: [DONE]\n\n');
@@ -130,12 +132,12 @@ try {
         apiKeyEnv: DEMO_KEY
         retryPolicy: { mode: normal, maxRetries: 0 }
         models:
-          - { id: demo, name: Demo model, contextWindow: 100000, maxTokens: 1000, input: [ text ], reasoningEfforts: false }
+          - { id: demo, name: Demo model, contextWindow: 100000, maxTokens: 1000, input: [ text, image ], reasoningEfforts: false }
           - id: demo-thinks
             name: Demo thinking
             contextWindow: 100000
             maxTokens: 1000
-            input: [ text ]
+            input: [ text, image ]
             reasoningEfforts:
               off: null
               low: low
@@ -151,6 +153,8 @@ try {
   await mkdir(project, { recursive: true });
   await writeFile(join(project, 'README.md'), '# acme-web\n\nA small demo app. Run `npm test`.\n');
   await writeFile(join(project, 'AGENTS.md'), 'Keep the tests green.\n');
+  const shot = join(home, 'handoff-shot.png');
+  await writeFile(shot, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAN0lEQVR4nO3QQREAMAgDQYoaJCK2XspUBZ+Ngcvsqb4vFpebcQcIECBAgAABAgQIECBAgACBTzAOTgK7QjPzNAAAAABJRU5ErkJggg==', 'base64'));
   git(project, 'init', '-q', '-b', 'main');
   git(project, 'add', '-A');
   git(project, 'commit', '-q', '-m', 'init');
@@ -208,12 +212,12 @@ try {
 
   // 1. The settings section is ours, is Chinese, and has one row per widget.
   await openWidgets(page);
-  assert.equal(await page.locator('[data-dsh-widgets-row]').count(), 5, 'five widget rows');
+  assert.equal(await page.locator('[data-dsh-widgets-row]').count(), 6, 'six widget rows');
   assert.equal(await page.locator('[data-dsh-widgets-row="projectBrief"]').count(), 1);
   const sectionText = await page.locator('[data-dsh-widgets-settings]').innerText();
   assert.match(sectionText, /项目基本信息/, 'the panel speaks the app language');
   assert.equal(/Improve prompt|Project brief/.test(sectionText), false, 'no English left in a Chinese panel');
-  step('Settings → 小组件 shows five rows, in Chinese');
+  step('Settings → 小组件 shows six rows, in Chinese');
 
   // 2. Off by default, and switching it on reaches the Host's settings file.
   const briefSwitch = page.locator('[data-dsh-widgets-row="projectBrief"] [data-dsh-widgets-switch]');
@@ -256,6 +260,11 @@ try {
   });
   assert.match(border, /^0px none/, `the wand draws no border (${border})`);
   step('the Improve prompt icon has no border and no background of its own');
+
+  const handoff = page.locator('[data-dsh-widgets-handoff]').first();
+  await handoff.waitFor({ state: 'visible', timeout: 10_000 });
+  assert.equal(await handoff.getAttribute('aria-busy'), 'false');
+  step('the Handoff icon sits beside the brief and Improve controls');
 
   // 5. The project brief is read quietly, and its own icon says so.
   const briefIcon = page.locator('[data-dsh-widgets-brief]').first();
@@ -308,6 +317,9 @@ try {
   await composer.waitFor({ state: 'visible', timeout: 20_000 });
   await composer.click();
   assert.equal(await wand.isDisabled(), false, 'the wand is pressable even before the chat has a model of its own');
+  const fileInput = page.locator('[data-composer-seat] input[type=file]').first();
+  await fileInput.setInputFiles(shot);
+  await page.waitForFunction(() => document.querySelectorAll('[data-composer-seat] img').length > 0, null, { timeout: 10_000 });
   await page.keyboard.type('改一下登录页');
   bodies.length = 0;
   await wand.click();
@@ -323,6 +335,12 @@ try {
   }));
   assert.equal(working.pulsing, true, 'the wand shows it is working');
   assert.equal(working.locked, true, 'the composer is locked');
+  const hardLock = await page.evaluate(() => ({
+    editable: document.querySelector('[data-composer-input]')?.getAttribute('contenteditable'),
+    sendDisabled: document.querySelector('[data-composer-seat] button[aria-label="Send message"]')?.disabled ?? null,
+  }));
+  assert.equal(hardLock.editable, 'false', 'the editor is made inert');
+  assert.equal(hardLock.sendDisabled, true, 'the send button is disabled');
 
   const typedBefore = (await composer.innerText()).trim();
   await composer.focus();
@@ -335,25 +353,30 @@ try {
     null, { timeout: 30_000 },
   );
   assert.ok(bodies.length > 0, 'the wand called the model');
+  assert.ok(bodies.some((body) => body.includes('data:image/png;base64,')), 'the optimize request carried the staged image');
   assert.equal(await page.evaluate(() => document.querySelector('[data-composer-seat]')?.hasAttribute('data-dsh-widgets-busy') ?? false), false, 'the composer is handed back');
-  step('the wand is pressable, pulses and locks the composer, then rewrites the draft');
+  step('the wand is pressable, pulses and locks the composer, then rewrites the draft with the image');
 
-  // 7. The first task opens with the project summary — and the hierarchy it was made from.
+  // Undo → redo, then send. A sent message must leave neither action behind.
+  const undo = page.locator('[data-dsh-widgets-undo]');
+  await undo.waitFor({ state: 'visible', timeout: 10_000 });
+  await undo.click();
+  await page.waitForFunction(() => (document.querySelector('[data-composer-input]')?.innerText ?? '').trim() === '改一下登录页', null, { timeout: 10_000 });
+  assert.equal(await page.locator('[data-dsh-widgets-redo]').count(), 1, 'undo is replaced by restore');
+  await page.locator('[data-dsh-widgets-redo]').click();
+  await page.waitForFunction(() => (document.querySelector('[data-composer-input]')?.innerText ?? '').trim() === 'Sure — here is the plan.', null, { timeout: 10_000 });
+  assert.equal(await page.locator('[data-dsh-widgets-undo]').count(), 1, 'restore brings undo back');
+
   await composer.click();
-  await page.keyboard.press('Meta+A');
-  await page.keyboard.press('Backspace');
-  await pause(300);
-  bodies.length = 0;
-  await page.keyboard.type('把测试跑一遍');
   await page.keyboard.press('Enter');
   await pause(6000);
-  assert.ok(bodies.length > 0, 'the model was called');
+  assert.equal(await page.locator('[data-dsh-widgets-undo]').count(), 0, 'a sent message leaves no undo');
+  assert.equal(await page.locator('[data-dsh-widgets-redo]').count(), 0, 'and no restore');
   const first = bodies.join('\n');
   assert.ok(bodies.some((body) => body.includes('acme-web is a small demo app')), 'the first task opens with the project summary');
-  // The note carries the hierarchy too, not only the conclusion.
   assert.match(first, /<目录结构>|<file hierarchy>/, 'the note carries the file hierarchy');
   assert.match(first, /README\.md/, 'the hierarchy names the project files');
-  step('the first task opens with the summary plus the file hierarchy, as a prompt');
+  step('undo/redo work, sending clears them, and the first task opens with the summary plus hierarchy');
 
   // 8. In a chat that now exists, Shift+Tab turns plan mode on through dsh's own command: the draft stays empty, and the
   //    next request carries the policy dsh attaches to a plan-mode turn.
@@ -370,6 +393,24 @@ try {
   assert.ok(bodies.length > 0, 'the second message reached the model');
   assert.match(second, /exit_plan_mode|plan mode/i, `the next request carries dsh's plan-mode policy (${second.slice(0, 160)})`);
   step('Shift+Tab turns plan mode on through dsh\'s own command: the next request carries the policy, the draft stays empty');
+
+  // 9. Handoff: one click creates a new session in the same project, sends the note, and tells it to continue the plan.
+  bodies.length = 0;
+  await handoff.click();
+  const handoffStart = Date.now();
+  while (Date.now() - handoffStart < 30_000 && !bodies.some((body) => body.includes('You are taking over from another session') || body.includes('你正在接手上一个会话'))) {
+    await pause(250);
+  }
+  const continuation = bodies.find((body) => body.includes('You are taking over from another session') || body.includes('你正在接手上一个会话'));
+  assert.ok(continuation, 'the new session received the continuation prompt');
+  assert.ok(continuation.includes(HANDOFF_SUMMARY), 'the generated handoff traveled to the new session');
+  assert.ok(continuation.includes(project), 'the new session was told the project path');
+  assert.match(continuation, /Continue expanding the plan|继续拓展计划/);
+  const summaryRequest = bodies.find((body) => body.includes('交接说明'));
+  assert.ok(summaryRequest?.includes('## 当前计划与下一步'), 'the Chinese session asked for a Chinese handoff');
+  assert.ok(summaryRequest?.includes('必须使用中文'), 'the handoff language followed the session, not the UI');
+  assert.equal(existsSync(join(project, 'HANDOFF.md')), false, 'the project was not written to');
+  step('the Handoff icon creates a same-project session and sends the plan-continuation prompt');
 
   assert.deepEqual(pageErrors, [], 'no page error');
   console.log(`dsh ${dshBin}\n${results.join('\n')}`);

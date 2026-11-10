@@ -286,5 +286,87 @@ const TABLE = {
   home.cleanup();
 }
 
+// A streamed model error reaches the route's error answer, not a silent empty rewrite.
+{
+  const home = tempDir();
+  const llm = makeLlm(TABLE, { preparers: () => 'ignored' });
+  llm.prepareCall = async (config) => ({
+    config,
+    stream: () => (async function* generate() {
+      yield { type: 'finish', reason: { kind: 'error', failure: { message: 'stream broke' } } };
+    })(),
+  });
+  const { ctx, routes } = makeCtx({ services: { llm } });
+  installImprove({ ...ctx }, home.dir);
+  const answer = await call(routes, IMPROVE_PATH, { method: 'POST', body: { sessionId: 's', text: 'x', provider: 'local', model: 'no-effort' } });
+  assert.equal(answer.status, 502);
+  assert.match(answer.json.error, /stream broke/);
+  home.cleanup();
+}
+
+// An attachment-admission failure is a 400 with the reason, never a text-only success.
+{
+  const home = tempDir();
+  const llm = makeLlm(TABLE, { preparers: () => 'never' });
+  const attachments = { admitPromptContent: async () => { throw new Error('bad image bytes'); } };
+  const { ctx, routes } = makeCtx({ services: { llm, attachments } });
+  installImprove({ ...ctx }, home.dir);
+  const answer = await call(routes, IMPROVE_PATH, {
+    method: 'POST',
+    body: { sessionId: 's', text: 'x', provider: 'local', model: 'sees', attachments: [{ type: 'image', mediaType: 'image/png', data: 'AAAA' }] },
+  });
+  assert.equal(answer.status, 400);
+  assert.match(answer.json.error, /bad image bytes/);
+  home.cleanup();
+}
+
+// "Same as the chat" resolves to the chat's selection on the Host.
+{
+  const home = tempDir();
+  const llm = makeLlm(TABLE, { preparers: () => 'chat rewrite' });
+  const { ctx, routes } = makeCtx({ services: { llm } });
+  ctx.sessionController = {
+    resolveAgent: async () => ({ agent: { id: 'a' } }),
+    agents: { selectionFor: () => ({ current: { provider: 'local', model: 'no-effort' } }) },
+  };
+  installImprove({ ...ctx }, home.dir);
+  const answer = await call(routes, IMPROVE_PATH, { method: 'POST', body: { sessionId: 's', text: 'x' } });
+  assert.equal(answer.status, 200, JSON.stringify(answer.json));
+  assert.equal(answer.json.provider, 'local');
+  assert.equal(answer.json.model, 'no-effort');
+  home.cleanup();
+}
+
+// With no chat route, dsh's default model is used.
+{
+  const home = tempDir();
+  const llm = makeLlm(TABLE, { preparers: () => 'default rewrite' });
+  const defaults = { currentSelection: () => ({ provider: 'local', model: 'no-effort' }) };
+  const { ctx, routes } = makeCtx({ services: { llm, agentDefaultModel: defaults } });
+  installImprove({ ...ctx }, home.dir);
+  const answer = await call(routes, IMPROVE_PATH, { method: 'POST', body: { sessionId: 's', text: 'x' } });
+  assert.equal(answer.status, 200, JSON.stringify(answer.json));
+  assert.equal(answer.json.provider, 'local');
+  home.cleanup();
+}
+
+// A model that does not disclose modalities still admits the image.
+{
+  const home = tempDir();
+  const llm = makeLlm(TABLE, { preparers: () => 'image rewrite' });
+  const admitted = [];
+  const attachments = { admitPromptContent: async (images) => { admitted.push(...images); return images.map((image, index) => ({ type: 'image', attachment: { attachmentId: `a${index}`, mediaType: image.mediaType } })); } };
+  const { ctx, routes } = makeCtx({ services: { llm, attachments } });
+  installImprove({ ...ctx }, home.dir);
+  const answer = await call(routes, IMPROVE_PATH, {
+    method: 'POST',
+    body: { sessionId: 's', text: 'see this', provider: 'local', model: 'no-effort', attachments: [{ type: 'image', mediaType: 'image/png', data: 'AAAA' }] },
+  });
+  assert.equal(answer.status, 200, JSON.stringify(answer.json));
+  assert.equal(admitted.length, 1);
+  assert.equal(llm.streams.at(-1).messages[0].content[1].attachment.attachmentId, 'a0');
+  home.cleanup();
+}
+
 void IMPROVE_MAX_TOKENS; void callControls;
 console.log('improve checks passed');

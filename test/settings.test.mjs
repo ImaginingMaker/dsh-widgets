@@ -9,8 +9,8 @@ import {
 } from '../dist/index.js';
 import { call, makeCtx, tempDir } from './helpers.mjs';
 
-// The switch table: five widgets, one off by default, and the default follows that list.
-assert.equal(WIDGETS.length, 5);
+// The switch table: six widgets, one off by default, and the default follows that list.
+assert.equal(WIDGETS.length, 6);
 assert.deepEqual(OFF_BY_DEFAULT, ['projectBrief']);
 assert.equal(defaultOn('projectBrief'), false, 'Project brief waits for the user');
 for (const id of WIDGETS.filter((entry) => !OFF_BY_DEFAULT.includes(entry))) assert.equal(defaultOn(id), true, id);

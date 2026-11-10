@@ -139,6 +139,49 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   await flush();
   assert.deepEqual(lastRequest().body, { sessionId: 's1', itemId: 'a', content: [{ type: 'text', text: 'first, edited' }], seen: [['text', 'first']] });
 
+  // Editing text keeps the attachments the message already has, and carries their ids in `seen`.
+  {
+    const withImage = [
+      { id: 'a', source: { kind: 'user' }, content: [{ type: 'image', attachment: { attachmentId: 'i1' } }, { type: 'text', text: 'look' }] },
+      { id: 'b', source: { kind: 'user' }, content: [{ type: 'text', text: 'second' }] },
+    ];
+    resetHooks(); requests = [];
+    answer = () => ({ ok: true, value: {} });
+    tree = render(withImage);
+    withProp(tree, 'data-dsh-widgets-queue-row')[0].props.children.find((child) => child?.props?.className === 'dw-text').props.onDoubleClick();
+    hookIndex = 0;
+    tree = render(withImage);
+    withProp(tree, 'data-dsh-widgets-edit')[0].props.onChange({ target: { value: 'look, edited' } });
+    hookIndex = 0;
+    tree = render(withImage);
+    await withProp(tree, 'data-dsh-widgets-edit')[0].props.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault() {} });
+    await flush();
+    assert.deepEqual(lastRequest().body, {
+      sessionId: 's1', itemId: 'a',
+      content: [{ type: 'image', attachmentId: 'i1' }, { type: 'text', text: 'look, edited' }],
+      seen: [['image', 'i1'], ['text', 'look']],
+    }, 'the attachment keeps its place and the stale check sees its id');
+  }
+
+  // Drag and the arrow buttons both go through the Host; the first/last arrows are disabled at the ends.
+  {
+    resetHooks(); requests = [];
+    answer = () => ({ ok: true, value: {} });
+    tree = render(rows);
+    const grip = withProp(tree, 'data-dsh-widgets-grip')[0];
+    grip.props.onDragStart();
+    hookIndex = 0; tree = render(rows);
+    withProp(tree, 'data-dsh-widgets-queue-row')[1].props.onDragOver({ preventDefault() {} });
+    hookIndex = 0; tree = render(rows);
+    await withProp(tree, 'data-dsh-widgets-queue-row')[1].props.onDrop({ preventDefault() {} });
+    await flush();
+    assert.deepEqual(lastRequest().body, { sessionId: 's1', itemId: 'a', to: 1, before: ['a', 'b', 'g'] });
+    hookIndex = 0; tree = render(rows);
+    const labels = withProp(tree, 'aria-label').map((node) => node.props['aria-label']);
+    assert.ok(labels.includes('queue.moveUp'));
+    assert.ok(labels.includes('queue.moveDown'));
+  }
+
   resetHooks();
   assert.equal(render(rows.slice(0, 1)), null, 'one row is not worth a strip');
   assert.equal(render(rows, { on: { queueReorder: false, queueEdit: false } }), null);
@@ -150,7 +193,7 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   const drafts = [];
   const notices = [];
   const storeOf = (analysis) => ({ getSnapshot: () => ({ analysis }) });
-  let state = { draft: 'make login work', attachmentIds: [] };
+  let state = { draft: 'make login work', attachmentIds: [], phase: 'plain', draftRev: 1 };
   const base = {
     sessionId: 's1', useInput: (read) => read(state), inputActions: { setDraft: (text) => drafts.push(text) },
     store: storeOf({ model: null, effort: null }),
@@ -188,7 +231,7 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
 
   // ---- the undo belongs to a draft, not to a sent message ---------------------------------------------------------
   {
-    state = { draft: 'make login work', attachmentIds: [] };
+    state = { draft: 'make login work', attachmentIds: [], phase: 'plain', draftRev: 1 };
     answer = () => ({ value: { text: 'Make the login form work.' } });
     resetHooks();
     tree = entry.Component(base);
@@ -198,18 +241,92 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
     assert.equal(withProp(tree, 'data-dsh-widgets-undo-draft').length, 1, 'an undo appears beside the wand');
 
     // The message is sent: the composer empties.
-    state = { draft: '', attachmentIds: [] };
+    state = { draft: '', attachmentIds: [], phase: 'sending', draftRev: 2 };
     hookIndex = 0;
     tree = entry.Component(base);
     await runEffects();
     hookIndex = 0;
     tree = entry.Component(base);
     assert.equal(withProp(tree, 'data-dsh-widgets-undo-draft').length, 0, 'a sent message leaves no undo behind');
+
+    // A send that clears the editor a moment later, then a new draft typed before the effect runs: the submit phase
+    // alone must drop the history.
+    state = { draft: 'make login work', attachmentIds: [], phase: 'plain', draftRev: 1 };
+    answer = () => ({ value: { text: 'Make the login form work.' } });
+    resetHooks(); tree = entry.Component(base);
+    await withProp(tree, 'data-dsh-widgets-wand')[0].props.onClick();
+    hookIndex = 0; tree = entry.Component(base);
+    assert.equal(withProp(tree, 'data-dsh-widgets-undo').length, 1);
+    state = { draft: 'new draft', attachmentIds: [], phase: 'sending', draftRev: 4 };
+    hookIndex = 0; tree = entry.Component(base);
+    await runEffects();
+    hookIndex = 0; tree = entry.Component(base);
+    assert.equal(withProp(tree, 'data-dsh-widgets-undo').length, 0, 'send clears even when a new draft is already there');
+    assert.equal(withProp(tree, 'data-dsh-widgets-redo').length, 0);
+  }
+
+  // ---- undo → redo switches the icons and the draft ----------------------------------------------------------------
+  {
+    state = { draft: 'make login work', attachmentIds: [], phase: 'plain', draftRev: 1 };
+    answer = () => ({ value: { text: 'Make the login form work.' } });
+    resetHooks(); tree = entry.Component(base);
+    await withProp(tree, 'data-dsh-widgets-wand')[0].props.onClick();
+    hookIndex = 0; tree = entry.Component(base);
+    withProp(tree, 'data-dsh-widgets-undo')[0].props.onClick();
+    assert.deepEqual(drafts.at(-1), 'make login work');
+    state = { draft: 'make login work', attachmentIds: [], phase: 'plain', draftRev: 1 };
+    hookIndex = 0; tree = entry.Component(base);
+    assert.equal(withProp(tree, 'data-dsh-widgets-undo').length, 0, 'the undo is replaced by the reverse action');
+    assert.equal(withProp(tree, 'data-dsh-widgets-redo').length, 1);
+    withProp(tree, 'data-dsh-widgets-redo')[0].props.onClick();
+    assert.deepEqual(drafts.at(-1), 'Make the login form work.');
+    state = { draft: 'Make the login form work.', attachmentIds: [], phase: 'plain', draftRev: 5 };
+    hookIndex = 0; tree = entry.Component(base);
+    assert.equal(withProp(tree, 'data-dsh-widgets-redo').length, 0, 'restoring the rewrite brings the undo back');
+    assert.equal(withProp(tree, 'data-dsh-widgets-undo').length, 1);
+  }
+
+  // ---- a failed image read is an error, never a silent text-only optimisation ---------------------------------------
+  {
+    state = { draft: 'match this screenshot', attachmentIds: ['a1'], phase: 'plain', draftRev: 1 };
+    requests = []; const count = drafts.length;
+    resetHooks(); tree = entry.Component({
+      ...base,
+      serializeAttachments: async () => { throw new Error('cannot read'); },
+    });
+    await withProp(tree, 'data-dsh-widgets-wand')[0].props.onClick();
+    assert.equal(requests.length, 0, 'no text-only request is sent');
+    assert.equal(drafts.length, count, 'the draft is untouched');
+    assert.deepEqual(notices.at(-1), ['error', 'improve.failed']);
+  }
+
+  // ---- a result that arrives after the draft moved on is discarded, never refilled ---------------------------------
+  {
+    state = { draft: 'keep this', attachmentIds: [], phase: 'plain', draftRev: 10 };
+    let release;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url, method: init?.method ?? 'GET', body: init?.body === undefined ? undefined : JSON.parse(init.body) });
+      await new Promise((resolve) => { release = resolve; });
+      return { ok: true, status: 200, json: async () => ({ text: 'stale rewrite' }) };
+    };
+    resetHooks(); requests = []; const count = drafts.length;
+    tree = entry.Component(base);
+    const pending = withProp(tree, 'data-dsh-widgets-wand')[0].props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    state = { draft: '', attachmentIds: [], phase: 'sending', draftRev: 11 };
+    hookIndex = 0; tree = entry.Component(base);
+    release();
+    await pending;
+    hookIndex = 0; tree = entry.Component(base);
+    assert.equal(drafts.length, count, 'the sent draft is not refilled');
+    assert.equal(withProp(tree, 'data-dsh-widgets-undo').length, 0);
+    globalThis.fetch = realFetch;
   }
 
   // ---- a call in flight: the icon says so, the composer is locked, the images travel ---------------------------------
   {
-    state = { draft: 'match this screenshot', attachmentIds: ['a1'] };
+    state = { draft: 'match this screenshot', attachmentIds: ['a1'], phase: 'plain', draftRev: 3 };
     let release;
     const realFetch = globalThis.fetch;
     globalThis.fetch = async (url, init) => {
@@ -223,10 +340,13 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
     const realDocument = globalThis.document;
     globalThis.document = { ...realDocument, querySelector: () => seat };
 
+    const locks = [];
+    const lockComposer = (reason) => { locks.push(['lock', reason]); return () => { locks.push(['release']); }; };
     resetHooks(); requests = [];
     tree = entry.Component({
       ...base,
       serializeAttachments: async (ids) => { serialized.push(...ids); return [{ type: 'image', mediaType: 'image/png', data: 'AAAA' }]; },
+      lockComposer,
     });
     const pending = withProp(tree, 'data-dsh-widgets-wand')[0].props.onClick();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -242,6 +362,7 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
     assert.deepEqual(seatAttribute, ['data-dsh-widgets-busy', ''], 'the composer is marked as locked');
     assert.deepEqual(serialized, ['a1'], 'the staged image was serialized');
     assert.deepEqual(requests.at(-1).body.attachments, [{ type: 'image', mediaType: 'image/png', data: 'AAAA' }]);
+    assert.deepEqual(locks, [['lock', 'improve.working']], 'the composer block is raised before the call');
 
     release();
     await pending;
@@ -252,10 +373,89 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
     tree = entry.Component(base);
     assert.equal(withProp(tree, 'data-dsh-widgets-wand')[0].props['aria-busy'], false, 'the icon stops when the call settles');
     assert.equal(seatAttribute, null, 'and the composer is handed back');
+    assert.deepEqual(locks, [['lock', 'improve.working'], ['release']], 'and the composer block is released');
     globalThis.document = realDocument;
     globalThis.fetch = realFetch;
   }
   answer = () => ({ ok: true, value: {} });
+}
+
+// ---- the Handoff to a new session icon ---------------------------------------------------------------------------------
+{
+  const entry = find('widgets-handoff');
+  assert.ok(entry !== undefined, 'the handoff icon registers');
+  assert.equal(entry.options.name, 'conversation.input.right');
+  assert.equal(entry.options.order, 996, 'between the project brief and the Improve wand');
+
+  const opened = [];
+  const notices = [];
+  const props = {
+    sessionId: 's1',
+    t: (key) => key,
+    notify: (level, text) => notices.push([level, text]),
+    openSession: async (id) => { opened.push(id); },
+  };
+
+  answer = () => ({ value: { sessionId: 'new-1', handoff: '## Goal\nShip it.', project: { cwd: '/repo' } } });
+  resetHooks(); requests = [];
+  let tree = entry.Component(props);
+  await withProp(tree, 'data-dsh-widgets-handoff')[0].props.onClick();
+  assert.deepEqual(lastRequest().body, { sessionId: 's1' });
+  assert.equal(lastRequest().url, '/api/widgets.handoff');
+  assert.deepEqual(opened, ['new-1'], 'the new session is opened');
+  assert.deepEqual(notices, [['info', 'handoff.done']]);
+
+  // A call in flight: the icon reports work and cannot be pressed twice.
+  {
+    let release;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url, method: init?.method ?? 'GET', body: init?.body === undefined ? undefined : JSON.parse(init.body) });
+      await new Promise((resolve) => { release = resolve; });
+      return { ok: true, status: 200, json: async () => ({ sessionId: 'new-2', handoff: 'h', project: {} }) };
+    };
+    resetHooks(); requests = []; opened.length = 0;
+    tree = entry.Component(props);
+    const pending = withProp(tree, 'data-dsh-widgets-handoff')[0].props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    hookIndex = 0; tree = entry.Component(props);
+    const running = withProp(tree, 'data-dsh-widgets-handoff')[0];
+    assert.equal(running.props['aria-busy'], true);
+    assert.equal(running.props['data-dsh-widgets-handoff-working'], '');
+    assert.equal(running.props.disabled, true);
+    release();
+    await pending;
+    hookIndex = 0; tree = entry.Component(props);
+    assert.equal(withProp(tree, 'data-dsh-widgets-handoff')[0].props['aria-busy'], false);
+    globalThis.fetch = realFetch;
+  }
+
+  // A failure keeps the current session and reports why.
+  answer = () => ({ ok: false, status: 502, value: { error: 'the model failed' } });
+  resetHooks(); opened.length = 0;
+  tree = entry.Component(props);
+  await withProp(tree, 'data-dsh-widgets-handoff')[0].props.onClick();
+  hookIndex = 0; tree = entry.Component(props);
+  assert.deepEqual(opened, []);
+  assert.deepEqual(notices.at(-1), ['error', 'handoff.failed']);
+  assert.equal(withProp(tree, 'role').some((node) => node.props.role === 'alert'), true, 'the error is visible');
+
+  // Navigation failing does not lose the handoff: the new id is reported.
+  answer = () => ({ value: { sessionId: 'new-3', handoff: 'h', project: {} } });
+  resetHooks(); notices.length = 0;
+  tree = entry.Component({ ...props, openSession: async () => { throw new Error('no navigation'); } });
+  await withProp(tree, 'data-dsh-widgets-handoff')[0].props.onClick();
+  assert.deepEqual(notices, [['info', 'handoff.done'], ['error', 'handoff.openFailed']]);
+
+  // No session means no target, and an empty handoff is not sent.
+  resetHooks(); requests = []; notices.length = 0;
+  tree = entry.Component({ ...props, sessionId: undefined });
+  assert.equal(withProp(tree, 'data-dsh-widgets-handoff')[0].props.disabled, true);
+  await withProp(tree, 'data-dsh-widgets-handoff')[0].props.onClick();
+  assert.equal(requests.length, 0);
+  assert.deepEqual(notices, [['warn', 'handoff.empty']]);
+  answer = () => ({ ok: true, value: {} });
+  notices.length = 0;
 }
 
 // ---- the project brief status icon -------------------------------------------------------------------------------------
@@ -399,7 +599,7 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   resetHooks();
   let tree = entry.Component({ store: makeStore(settingsOf()), models: makeModels({ supported: false, efforts: [] }), locale: ctx.locale });
   assert.deepEqual(withProp(tree, 'data-dsh-widgets-row').map((node) => node.props['data-dsh-widgets-row']),
-    ['planToggle', 'queueReorder', 'queueEdit', 'improvePrompt', 'projectBrief']);
+    ['planToggle', 'queueReorder', 'queueEdit', 'improvePrompt', 'handoff', 'projectBrief']);
   assert.ok(texts(tree).includes('项目基本信息'), 'the new widget is described in the UI language');
 
   // A switch writes exactly its own id.
@@ -408,7 +608,7 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   tree = entry.Component({ store, models: makeModels({ supported: false, efforts: [] }), locale: ctx.locale });
   // The marker is on the Switch element and on the button it draws; the element is the one with `onChange`.
   const switches = withProp(tree, 'data-dsh-widgets-switch').filter((node) => typeof node.props.onChange === 'function');
-  assert.equal(switches.length, 5);
+  assert.equal(switches.length, 6);
   switches.find((node) => node.props.label === '项目基本信息').props.onChange(true);
   assert.deepEqual(store.saved, [{ id: 'projectBrief', on: true }]);
 
@@ -450,6 +650,42 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   hookIndex = 0;
   tree = entry.Component({ store, models: makeModels(reasoning), locale: ctx.locale });
   assert.deepEqual(withProp(tree, 'data-dsh-widgets-row').map((node) => node.props['data-dsh-widgets-row']), ['queueReorder', 'queueEdit']);
+
+  // Empty search says so; a load error is visible; language resolves from the pinned value or the app.
+  resetHooks();
+  tree = entry.Component({ store: makeStore(settingsOf()), models: makeModels(reasoning), locale: ctx.locale });
+  withProp(tree, 'data-dsh-widgets-search')[0].props.onChange({ target: { value: 'zzz-no-widget' } });
+  hookIndex = 0;
+  tree = entry.Component({ store: makeStore(settingsOf()), models: makeModels(reasoning), locale: ctx.locale });
+  assert.ok(texts(tree).includes('没有匹配的小组件。'));
+
+  resetHooks();
+  tree = entry.Component({ store: makeStore(settingsOf({ error: 'boom' })), models: makeModels(reasoning), locale: ctx.locale });
+  assert.ok(texts(tree).some((text) => text.includes('无法读取设置')), 'the load error is shown');
+  assert.equal(withProp(tree, 'role').some((node) => node.props.role === 'alert'), true);
+
+  resetHooks();
+  tree = entry.Component({ store: makeStore(settingsOf({ language: 'en' })), models: makeModels(reasoning), locale: ctx.locale });
+  assert.ok(texts(tree).includes('Project brief'));
+  assert.equal(texts(tree).includes('项目基本信息'), false, 'the pinned language wins over the app');
+
+  resetHooks();
+  tree = entry.Component({ store: makeStore(settingsOf({ language: 'auto' })), models: makeModels(reasoning), locale: ctx.locale });
+  assert.ok(texts(tree).includes('项目基本信息'), 'auto follows the app language');
+
+  // Choosing an effort writes only that field; turning Improve off hides its shared model row.
+  const edgeEffortStore = makeStore(settingsOf({ analysis: { model: { provider: 'p', model: 'm' }, effort: null } }));
+  resetHooks();
+  tree = entry.Component({ store: edgeEffortStore, models: makeModels(reasoning), locale: ctx.locale });
+  await runEffects();
+  hookIndex = 0;
+  tree = entry.Component({ store: edgeEffortStore, models: makeModels(reasoning), locale: ctx.locale });
+  withProp(tree, 'data-dsh-widgets-analysis-effort')[0].props.onChange({ target: { value: 'high' } });
+  assert.deepEqual(edgeEffortStore.saved.at(-1), { analysis: { effort: 'high' } });
+
+  resetHooks();
+  tree = entry.Component({ store: makeStore(settingsOf({ on: { improvePrompt: false } })), models: makeModels(reasoning), locale: ctx.locale });
+  assert.equal(withProp(tree, 'data-dsh-widgets-analysis-model').length, 0, 'the model row belongs to the Improve widget');
 }
 
 console.log('client widgets checks passed');
