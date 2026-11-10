@@ -108,24 +108,7 @@ export interface SessionQueryService {
   readTitle?(sessionId: string, signal?: AbortSignal): Promise<{ readonly title?: { readonly text?: string } } | undefined>;
 }
 
-export interface InboxMessage {
-  readonly id: string;
-  readonly source?: { readonly kind?: string };
-  readonly content: readonly {
-    readonly type?: string;
-    readonly text?: string;
-    readonly attachment?: { readonly attachmentId?: string };
-  }[];
-}
-
-export interface Inbox {
-  readonly nextTurn?: readonly InboxMessage[];
-  splice?(target: string, start: number, count: number, inserted: readonly InboxMessage[]): unknown;
-  replace?(id: string, message: InboxMessage): boolean | undefined;
-}
-
 export interface Agent {
-  readonly inbox?: Inbox;
   readonly session?: unknown;
 }
 

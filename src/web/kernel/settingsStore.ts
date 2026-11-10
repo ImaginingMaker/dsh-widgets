@@ -17,10 +17,6 @@ const EMPTY: SettingsView = { ...defaultSettings(), ready: false };
 export const isOn = (settings: Settings | SettingsView | undefined, id: WidgetId): boolean =>
   (OFF_BY_DEFAULT.includes(id) ? settings?.on?.[id] === true : settings?.on?.[id] !== false);
 
-/** The queue strip is one panel that serves two switches. */
-export const queueOn = (settings: Settings | SettingsView | undefined): boolean =>
-  isOn(settings, 'queueReorder') || isOn(settings, 'queueEdit');
-
 /**
  * The switches and the Improve prompt settings, from the Host half — one source of truth for every window, so a switch
  * set on one device is not a different value on another.

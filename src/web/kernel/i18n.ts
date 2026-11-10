@@ -14,10 +14,6 @@ const DICTIONARY: Record<Language, Record<string, string>> = {
   en: {
     'widget.planToggle': 'Shift+Tab plan mode',
     'widget.planToggle.desc': 'Shift+Tab turns plan mode on, and off again when it is on. In a chat that has not started yet it writes /plan at the head of the draft instead.',
-    'widget.queueReorder': 'Queue drag-and-drop',
-    'widget.queueReorder.desc': 'Drag a queued message by its grip, or focus the grip and press the up and down keys, to change the order they will be sent in.',
-    'widget.queueEdit': 'Edit queued message in place',
-    'widget.queueEdit.desc': 'Double-click a queued message to change its text before it is sent. Enter saves, Esc cancels.',
     'widget.improvePrompt': 'Improve prompt',
     'widget.improvePrompt.desc': 'A magic wand that rewrites your draft as a clearer prompt, using the model and reasoning effort chosen above.',
     'widget.handoff': 'Hand off to a new session',
@@ -41,14 +37,6 @@ const DICTIONARY: Record<Language, Record<string, string>> = {
     'settings.loadFailed': 'The settings could not be read: {error}',
     'settings.retry': 'Retry',
 
-    'queue.title': 'Queue',
-    'queue.moveUp': 'Move up',
-    'queue.moveDown': 'Move down',
-    'queue.edit': 'Edit',
-    'queue.save': 'Save',
-    'queue.cancel': 'Cancel',
-    'queue.grip': 'Drag to reorder',
-    'queue.failed': 'The queue changed, or the move was refused',
 
     'improve.title': 'Improve prompt',
     'improve.working': 'Optimising the prompt…',
@@ -83,10 +71,6 @@ const DICTIONARY: Record<Language, Record<string, string>> = {
   zh: {
     'widget.planToggle': 'Shift+Tab 计划模式',
     'widget.planToggle.desc': 'Shift+Tab 打开计划模式，已在计划模式时则关闭。尚未开始的会话里改为在草稿开头写入 /plan。',
-    'widget.queueReorder': '队列拖拽排序',
-    'widget.queueReorder.desc': '拖动队列消息左侧的手柄，或聚焦手柄后按上下方向键，改变它们的发送顺序。',
-    'widget.queueEdit': '就地编辑队列消息',
-    'widget.queueEdit.desc': '双击队列中的消息即可在发送前修改文字。Enter 保存，Esc 取消。',
     'widget.improvePrompt': '提示词优化',
     'widget.improvePrompt.desc': '用魔法棒把草稿改写为更清晰的提示词，使用上面选定的模型与推理档位。',
     'widget.handoff': '交接并新建会话',
@@ -110,14 +94,6 @@ const DICTIONARY: Record<Language, Record<string, string>> = {
     'settings.loadFailed': '无法读取设置：{error}',
     'settings.retry': '重试',
 
-    'queue.title': '队列',
-    'queue.moveUp': '上移',
-    'queue.moveDown': '下移',
-    'queue.edit': '编辑',
-    'queue.save': '保存',
-    'queue.cancel': '取消',
-    'queue.grip': '拖动以重新排序',
-    'queue.failed': '队列已变化，或移动被拒绝',
 
     'improve.title': '提示词优化',
     'improve.working': '正在优化提示词…',

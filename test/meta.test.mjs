@@ -51,7 +51,7 @@ assert.match(ci, /actions\/setup-node@/);
 const client = ['src/web/index.ts', 'src/web/kernel/i18n.ts', 'src/web/kernel/plan.ts', 'src/web/widgets/planToggle.ts'].map(read).join('\n');
 const index = ['src/host/index.ts', 'src/host/store.ts', 'src/host/files.ts', 'src/host/routes/improve.ts', 'src/host/routes/models.ts'].map(read).join('\n');
 const bundle = read('dist/web/client.js');
-assert.equal(WIDGETS.length, 6);
+assert.equal(WIDGETS.length, 4);
 for (const id of WIDGETS) {
   // The client half names every widget (the label, the panel or the settings row); the Host half only owns the ones whose
   // work runs outside the browser, which the checks below pin down.
@@ -79,10 +79,11 @@ assert.match(index, /O_NOFOLLOW/, 'file reads cannot follow a swapped-in symlink
 // ---- the README documents each widget, in both languages --------------------------------------------------------------
 const readme = read('README.md');
 for (const id of WIDGETS) assert.ok(readme.includes(id), `README names ${id}`);
-for (const gone of ['branchTarget', 'branchTree', 'Branch per chat', 'Branches in the workspace tree']) {
+for (const gone of ['branchTarget', 'branchTree', 'Branch per chat', 'Branches in the workspace tree',
+  'queueReorder', 'queueEdit', 'Queue drag-and-drop', 'Edit queued message in place']) {
   assert.equal(readme.includes(gone), false, `README no longer mentions ${gone}`);
 }
-for (const phrase of ['Shift+Tab plan mode', 'Queue drag-and-drop', 'Edit queued message in place', 'Improve prompt', 'Project brief']) {
+for (const phrase of ['Shift+Tab plan mode', 'Improve prompt', 'Project brief']) {
   assert.ok(readme.includes(phrase), `README documents ${phrase}`);
 }
 assert.match(readme, /MIT/);

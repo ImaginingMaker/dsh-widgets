@@ -53,9 +53,3 @@ export interface ComposerLock {
   /** Raise the block; answers the release, or undefined when this dsh cannot block the composer. */
   (reason: string): (() => void) | undefined;
 }
-
-export interface QueueProps extends SlotBase {
-  readonly sessionId: string;
-  readonly useProjection: (name: string) => readonly unknown[] | undefined;
-  readonly settings: unknown;
-}

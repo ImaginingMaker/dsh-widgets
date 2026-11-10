@@ -30,14 +30,12 @@ Requires dsh ≥ 0.2.2-rc.1. MIT licensed. **No runtime dependencies** — the p
 | Widget | What it does | Default |
 |---|---|---|
 | [Shift+Tab plan mode](#shifttab-plan-mode) | `Shift+Tab` turns plan mode on, and off again, through dsh's own command. | on |
-| [Queue drag-and-drop](#queue-drag-and-drop) | Reorder queued messages by drag, or by the arrow keys. | on |
-| [Edit queued message in place](#edit-queued-message-in-place) | Change a queued message's text before it is sent. | on |
 | [Improve prompt](#improve-prompt) | One model call rewrites your draft, with a model and a reasoning effort you choose. | on |
 | [Hand off to a new session](#hand-off-to-a-new-session) | One click summarises this session and continues it in a new session in the same project. | on |
 | [Project brief](#project-brief) | A quiet summary of the project, gathered before the first task and handed to it. | **off** |
 
 Each widget's internal id — the key in `storages/dsh-widgets/settings.json`, and what to quote in an issue — is
-`planToggle`, `queueReorder`, `queueEdit`, `improvePrompt`, `handoff` and `projectBrief`.
+`planToggle`, `improvePrompt`, `handoff` and `projectBrief`.
 
 ---
 
@@ -55,24 +53,6 @@ command and is left alone.
 
 Alt, Ctrl and Meta are not intercepted, a repeated key and an IME composition are ignored, and an open `/` menu keeps
 `Shift+Tab` for itself.
-
-### Queue drag-and-drop
-
-Queued messages appear as a strip above the composer while the agent is running, one row each, with a grip. Drag a row
-onto another to reorder, or focus the grip and press `↑` / `↓`. `Esc` ends a drag. A single queued message still shows,
-so it can be edited; the grip and the arrows appear once there are at least two rows to reorder.
-
-Only your own messages move: a goal round or a question reply in the range keeps its place. The move goes through the
-Host, so a message keeps its images and files. If the queue changed since you looked — a message started sending — the
-move is refused rather than applied to the wrong row.
-
-### Edit queued message in place
-
-Double-click a queued message (or click **Edit**) to change its text before it is sent. `Enter` saves, `Esc` cancels,
-`Shift+Enter` adds a line. The message keeps its id and its place in the queue.
-
-An edit carries what you saw of the message, so a change made on another device meanwhile is not overwritten — the save
-is refused instead. Attachments you keep stay attached; this build does not add new images from the queue strip.
 
 ### Improve prompt
 
@@ -229,7 +209,7 @@ Rows also carry their own controls: the model and effort live under **Improve pr
 
 Search filters the rows by name and description, ignoring case and accents.
 
-All six switches live in one file, `storages/dsh-widgets/settings.json` under the dsh home, written owner-only and
+All four switches live in one file, `storages/dsh-widgets/settings.json` under the dsh home, written owner-only and
 atomically (a temp file, then a rename), so a reader never sees half a file and one broken write cannot lock you out —
 a missing or unreadable file reads as the defaults.
 
@@ -245,14 +225,11 @@ a missing or unreadable file reads as the defaults.
 
 - The only git command this plugin runs is `git rev-parse HEAD`, to notice that a project changed. Ignored files
   (`node_modules/`, `.env`) are never read for a summary.
-- The queue strip owns its own rows; it does not graft controls onto dsh's markup, so a dsh update cannot leave a
-  half-drawn handle behind. The trade-off is that it is a separate strip rather than handles inside dsh's own rows.
-- This build does not add new images to a queued message.
 
 ## Compatibility
 
 dsh ≥ 0.2.0-rc.2, Node ≥ 22. Tested against dsh's published Client and Host service contracts — slot names
-(`conversation.input.right`, `conversation.input.dock`, `settings.section`), the `llm` model/effort API, and
+(`conversation.input.right`, `settings.section`), the `llm` model/effort API, and
 `connection.fetch.register`.
 
 ## Development
@@ -290,14 +267,14 @@ through a guard, so a profile that lacks one still loads every widget it can.
 ```
 src/
 ├── shared/     pure, no node:, no React — compiled into both halves
-│   ├── types.ts  settings.ts  reasoning.ts  queue.ts  brief.ts  routes.ts  styles.ts
+│   ├── types.ts  settings.ts  reasoning.ts  brief.ts  routes.ts  styles.ts
 ├── host/       node: allowed, no DOM
 │   ├── index.ts  store.ts  files.ts  git.ts  project.ts
-│   └── routes/   settings, models, improve, queue, brief, plan
+│   └── routes/   settings, models, improve, brief, plan
 └── web/        DOM only, no node:
     ├── index.ts  slot.ts
-    ├── kernel/   i18n, settingsStore, modelStore, hostJson, queueApi, plan, safe
-    └── widgets/  planToggle, queue, improve, briefStatus, settings
+    ├── kernel/   i18n, settingsStore, modelStore, hostJson, plan, safe
+    └── widgets/  planToggle, improve, briefStatus, settings
 ```
 
 `src/shared` is the contract between the halves: if it needs `node:fs` or `document`, it belongs in one of the others.
@@ -312,9 +289,8 @@ The suite is plain `node --test` with no test framework:
 | `test/settings.test.mjs` | defaults, narrowing, atomic owner-only writes, serialized writes, every patch shape |
 | `test/reasoning.test.mjs` | efforts read from the model configuration, and what is actually sent |
 | `test/improve.test.mjs` | the prompt, safe file reads, the route, superseding, failures |
-| `test/queue.test.mjs` | the ordering rule and both queue routes |
 | `test/client-plan.test.mjs` | the built bundle's `PlanToggle` against a fake DOM |
-| `test/client-widgets.test.mjs` | the built bundle's components: queue, wand, brief icon, settings |
+| `test/client-widgets.test.mjs` | the built bundle's components: wand, brief icon, settings |
 
 The client tests run **`dist/web/client.js`**, not the sources — so they also prove the loader wrapper and the externals
 are right. They stub `window.__ModuleLoader__`, React and the DOM; they do not prove anything about how dsh renders.
@@ -331,7 +307,7 @@ That is what `npm run e2e` is for. It is not a mock:
 
 ```
 ✓ dsh started and rendered with dsh-widgets loaded
-✓ Settings → 小组件 shows six rows, in Chinese
+✓ Settings → 小组件 shows four rows, in Chinese
 ✓ a switch writes storages/dsh-widgets/settings.json
 ✓ the reasoning ladder comes from the model configuration, and off is a level of it
 ✓ the Improve prompt icon has no border and no background of its own
@@ -371,19 +347,11 @@ dsh plugin --profile web add dsh-widgets
 
 然后重启 dsh。需要 dsh ≥ 0.2.2-rc.1，MIT 许可，**无运行时依赖** —— 发布包里只有构建产物。
 
-### 六个组件
+### 四个组件
 
 **Shift+Tab 计划模式** —— 在草稿最前面加上 `/plan `，再按一次移除。这正是 dsh 自己识别的格式（`/plan` 后接
 空格、制表符或行尾）；`/planning` 不会被误判。只改前缀，草稿其余内容、文件 chip 与附件保持不变，光标移到末尾。
 已在计划模式时，Shift+Tab 通过 dsh 自己的 `/plan off` 退出。Alt / Ctrl / Meta 不拦截，长按重复与输入法组合会被忽略。
-
-**队列拖拽排序** —— 会话运行中排队的消息会在输入框上方列成一条，每条带一个手柄，拖到另一条上即可换位，或聚焦手柄后按 `↑` / `↓`，`Esc` 结束。
-只有一条排队消息时队列条依然显示（可以就地编辑），有两条以上时才出现手柄与箭头；只有你自己的消息能移动（目标轮次、提问回复保持原位）。
-移动经 Host 处理，因此图片与文件会跟着消息走；
-若队列在你查看之后发生了变化，移动会被拒绝，而不是作用到错的行上。
-
-**就地编辑队列消息** —— 双击（或点 **编辑**）在发送前修改文字。`Enter` 保存、`Esc` 取消、`Shift+Enter` 换行。
-消息保持原有 id 与队列位置。保存时带上你所看到的内容，因此不会覆盖另一台设备同时做的修改——不一致时直接拒绝。
 
 **提示词优化** —— 输入框旁的魔法棒把草稿改写为更清晰的提示词：目标在前，多步骤时用编号，并给出应当通过的检查。
 它读取草稿与项目的一份只读摘要（目录层级，加上 `AGENTS.md`、`README.md`、`package.json`）。改写结果
@@ -464,7 +432,7 @@ reasoningEfforts:
 
 ### 设置与隐私
 
-六个开关都保存在 dsh 主目录下的 `storages/dsh-widgets/settings.json`，仅本人可读，原子写入（先写临时文件再
+四个开关都保存在 dsh 主目录下的 `storages/dsh-widgets/settings.json`，仅本人可读，原子写入（先写临时文件再
 重命名），因此读方不会读到半个文件，一次坏写入也不会把人锁在设置之外——文件缺失或损坏都按默认值读取。
 
 本插件**不发起任何网络请求**；「提示词优化」只在你点击魔法棒时调用模型；「交接并新建会话」只在你点击交接图标时
@@ -475,9 +443,6 @@ reasoningEfforts:
 
 - 本插件唯一执行的 git 命令是 `git rev-parse HEAD`，用来发现项目已变化；被忽略的文件（`node_modules/`、`.env`）
   永远不会被读取来生成摘要。
-- 队列条自成一列，不去改写 dsh 自身的 DOM：好处是 dsh 升级不会留下画了一半的手柄，代价是它是独立的一条，
-  而不是嵌在 dsh 自己的行里。
-- 本版本不支持从队列条新增图片。
 
 ### 开发与测试
 
@@ -511,7 +476,7 @@ npm run e2e         # 先构建，再在真实 dsh 与真实浏览器里跑端�
 - 用真实 `dsh` CLI 起 `--profile web --port … --no-open`；
 - 用 Playwright 打开**真实 Chrome**，走 dsh 打印的 access token；
 - 起一个假的 OpenAI 兼容模型，不调用任何真实供应商；
-- 断言真实发生的事情：设置面板六行、开关真的写进 `storages/dsh-widgets/settings.json`、没有 `reasoningEfforts`
+- 断言真实发生的事情：设置面板四行、开关真的写进 `storages/dsh-widgets/settings.json`、没有 `reasoningEfforts`
   的模型不显示档位菜单、有 `off/low/high` 的模型下拉恰好那三项、
   Shift+Tab 在真实 composer 里写入并移除 `/plan `。
 

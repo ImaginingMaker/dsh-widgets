@@ -9,13 +9,15 @@ import {
 } from '../dist/index.js';
 import { call, makeCtx, tempDir } from './helpers.mjs';
 
-// The switch table: six widgets, one off by default, and the default follows that list.
-assert.equal(WIDGETS.length, 6);
+// The switch table: four widgets, one off by default, and the default follows that list.
+assert.equal(WIDGETS.length, 4);
 assert.deepEqual(OFF_BY_DEFAULT, ['projectBrief']);
 assert.equal(defaultOn('projectBrief'), false, 'Project brief waits for the user');
 for (const id of WIDGETS.filter((entry) => !OFF_BY_DEFAULT.includes(entry))) assert.equal(defaultOn(id), true, id);
 assert.equal(isWidget('planToggle'), true);
 assert.equal(isWidget('branchTree'), false, 'a removed widget is not a widget');
+assert.equal(isWidget('queueReorder'), false);
+assert.equal(isWidget('queueEdit'), false);
 assert.equal(isWidget('nope'), false);
 assert.deepEqual(Object.keys(defaultSettings().on).sort(), [...WIDGETS].sort());
 assert.equal(defaultSettings().analysis.model, null);
@@ -31,6 +33,7 @@ const narrowed = sanitizeSettings({
 });
 assert.equal(narrowed.on.planToggle, true, 'a wrong type keeps the default');
 assert.equal('extra' in narrowed.on, false, 'an unknown switch is dropped');
+assert.equal('queueReorder' in sanitizeSettings({ on: { queueReorder: true } }).on, false, 'a switch removed from WIDGETS is dropped from old files');
 assert.deepEqual(narrowed.analysis.model, { provider: 'p', model: 'm' });
 assert.equal(narrowed.analysis.effort, 'low');
 assert.equal(narrowed.language, 'zh');

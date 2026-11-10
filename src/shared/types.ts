@@ -6,8 +6,6 @@
 /** Every widget, in Settings order. `WidgetId` is the single source of that list's type. */
 export const WIDGETS = [
   'planToggle',
-  'queueReorder',
-  'queueEdit',
   'improvePrompt',
   'handoff',
   'projectBrief',

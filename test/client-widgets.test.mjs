@@ -1,5 +1,5 @@
-// Runs the real client.js components against a fake React and DOM: the queue strip, the target chip (picker and badge),
-// the Improve prompt wand, the project-brief status icon, and the Settings panel.
+// Runs the real client.js components against a fake React and DOM: the target chip (picker and badge), the Improve
+// prompt wand, the project-brief status icon, and the Settings panel.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
@@ -88,119 +88,6 @@ module.factory((id) => (id === 'react' ? React : {})).apply(ctx);
 const find = (id) => registrations.find((entry) => entry.options.id === id);
 
 assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not by whichever widget renders first');
-
-// ---- the queue strip ---------------------------------------------------------------------------------------------------
-{
-  const entry = find('widgets-queue');
-  assert.ok(entry !== undefined, 'the queue panel registers');
-  assert.equal(entry.options.name, 'conversation.input.dock');
-  const render = (rows, settings = { on: {} }, notify = () => {}) => {
-    hookIndex = 0;
-    // dsh's projection store is key-addressed: the queue lives under `inbox['next-turn']`, so an implementation that
-    // asks for `next-turn` directly gets nothing and this fake fails the way the real app did.
-    const element = entry.Component({
-      sessionId: 's1',
-      useProjection: (name) => (name === 'inbox' ? { 'next-turn': rows } : undefined),
-      notify,
-      t: (key) => key,
-    });
-    return element.type({ ...element.props, settings });
-  };
-  const rows = [
-    { id: 'a', source: { kind: 'user' }, content: [{ type: 'text', text: 'first' }] },
-    { id: 'b', source: { kind: 'user' }, content: [{ type: 'text', text: 'second' }] },
-    { id: 'g', source: { kind: 'goal' }, content: [{ type: 'text', text: 'goal round' }] },
-  ];
-  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-  resetHooks(); requests = [];
-  let tree = render(rows);
-  assert.equal(withProp(tree, 'data-dsh-widgets-queue').length, 1);
-  const grips = withProp(tree, 'data-dsh-widgets-grip');
-  assert.equal(grips.length, 2, 'only your own messages get a grip');
-
-  await grips[0].props.onKeyDown({ key: 'ArrowDown', preventDefault() {} });
-  await flush();
-  assert.deepEqual(lastRequest().body, { sessionId: 's1', itemId: 'a', to: 1, before: ['a', 'b', 'g'] });
-
-  // A refusal is reported through dsh's own notice.
-  const notices = [];
-  answer = () => ({ ok: false, status: 409, value: { error: 'the queue changed' } });
-  hookIndex = 0;
-  const failing = render(rows, { on: {} }, (level, text) => notices.push([level, text]));
-  await withProp(failing, 'data-dsh-widgets-grip')[0].props.onKeyDown({ key: 'ArrowDown', preventDefault() {} });
-  await flush();
-  assert.deepEqual(notices, [['error', 'queue.failed']]);
-  answer = () => ({ ok: true, value: {} });
-
-  // In-place editing saves what the user saw.
-  resetHooks(); requests = [];
-  tree = render(rows);
-  withProp(tree, 'data-dsh-widgets-queue-row')[0].props.children.find((child) => child?.props?.className === 'dw-text').props.onDoubleClick();
-  hookIndex = 0;
-  tree = render(rows);
-  withProp(tree, 'data-dsh-widgets-edit')[0].props.onChange({ target: { value: 'first, edited' } });
-  hookIndex = 0;
-  tree = render(rows);
-  await withProp(tree, 'data-dsh-widgets-edit')[0].props.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault() {} });
-  await flush();
-  assert.deepEqual(lastRequest().body, { sessionId: 's1', itemId: 'a', content: [{ type: 'text', text: 'first, edited' }], seen: [['text', 'first']] });
-
-  // Editing text keeps the attachments the message already has, and carries their ids in `seen`.
-  {
-    const withImage = [
-      { id: 'a', source: { kind: 'user' }, content: [{ type: 'image', attachment: { attachmentId: 'i1' } }, { type: 'text', text: 'look' }] },
-      { id: 'b', source: { kind: 'user' }, content: [{ type: 'text', text: 'second' }] },
-    ];
-    resetHooks(); requests = [];
-    answer = () => ({ ok: true, value: {} });
-    tree = render(withImage);
-    withProp(tree, 'data-dsh-widgets-queue-row')[0].props.children.find((child) => child?.props?.className === 'dw-text').props.onDoubleClick();
-    hookIndex = 0;
-    tree = render(withImage);
-    withProp(tree, 'data-dsh-widgets-edit')[0].props.onChange({ target: { value: 'look, edited' } });
-    hookIndex = 0;
-    tree = render(withImage);
-    await withProp(tree, 'data-dsh-widgets-edit')[0].props.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault() {} });
-    await flush();
-    assert.deepEqual(lastRequest().body, {
-      sessionId: 's1', itemId: 'a',
-      content: [{ type: 'image', attachmentId: 'i1' }, { type: 'text', text: 'look, edited' }],
-      seen: [['image', 'i1'], ['text', 'look']],
-    }, 'the attachment keeps its place and the stale check sees its id');
-  }
-
-  // Drag and the arrow buttons both go through the Host; the first/last arrows are disabled at the ends.
-  {
-    resetHooks(); requests = [];
-    answer = () => ({ ok: true, value: {} });
-    tree = render(rows);
-    const grip = withProp(tree, 'data-dsh-widgets-grip')[0];
-    grip.props.onDragStart();
-    hookIndex = 0; tree = render(rows);
-    withProp(tree, 'data-dsh-widgets-queue-row')[1].props.onDragOver({ preventDefault() {} });
-    hookIndex = 0; tree = render(rows);
-    await withProp(tree, 'data-dsh-widgets-queue-row')[1].props.onDrop({ preventDefault() {} });
-    await flush();
-    assert.deepEqual(lastRequest().body, { sessionId: 's1', itemId: 'a', to: 1, before: ['a', 'b', 'g'] });
-    hookIndex = 0; tree = render(rows);
-    const labels = withProp(tree, 'aria-label').map((node) => node.props['aria-label']);
-    assert.ok(labels.includes('queue.moveUp'));
-    assert.ok(labels.includes('queue.moveDown'));
-  }
-
-  // One queued message still gets the strip, because that is the only row its edit switch can act on; there is simply
-  // nothing to reorder yet, so no grip and no arrows.
-  resetHooks();
-  const single = render(rows.slice(0, 1));
-  assert.equal(withProp(single, 'data-dsh-widgets-queue').length, 1, 'a single queued message still shows the strip');
-  assert.equal(withProp(single, 'data-dsh-widgets-grip').length, 0, 'one row has nothing to reorder');
-  assert.equal(withProp(single, 'data-dsh-widgets-edit-open').length, 1, 'and its edit is reachable');
-  assert.equal(render([]), null, 'an empty queue has no strip');
-  assert.equal(render([rows[2]]), null, 'a lone message that is not yours has nothing to act on');
-  assert.equal(render(rows.slice(0, 1), { on: { queueEdit: false } }), null, 'one row with editing off has nothing to reorder');
-  assert.equal(render(rows, { on: { queueReorder: false, queueEdit: false } }), null);
-}
 
 // ---- the Improve prompt wand -------------------------------------------------------------------------------------------
 {
@@ -690,7 +577,7 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   resetHooks();
   let tree = entry.Component({ store: makeStore(settingsOf()), models: makeModels({ supported: false, efforts: [] }), locale: ctx.locale });
   assert.deepEqual(withProp(tree, 'data-dsh-widgets-row').map((node) => node.props['data-dsh-widgets-row']),
-    ['planToggle', 'queueReorder', 'queueEdit', 'improvePrompt', 'handoff', 'projectBrief']);
+    ['planToggle', 'improvePrompt', 'handoff', 'projectBrief']);
   assert.ok(texts(tree).includes('项目基本信息'), 'the new widget is described in the UI language');
 
   // A switch writes exactly its own id.
@@ -699,7 +586,7 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   tree = entry.Component({ store, models: makeModels({ supported: false, efforts: [] }), locale: ctx.locale });
   // The marker is on the Switch element and on the button it draws; the element is the one with `onChange`.
   const switches = withProp(tree, 'data-dsh-widgets-switch').filter((node) => typeof node.props.onChange === 'function');
-  assert.equal(switches.length, 6);
+  assert.equal(switches.length, 4);
   switches.find((node) => node.props.label === '项目基本信息').props.onChange(true);
   assert.deepEqual(store.saved, [{ id: 'projectBrief', on: true }]);
 
@@ -737,10 +624,10 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   // Search narrows the rows.
   resetHooks();
   tree = entry.Component({ store, models: makeModels(reasoning), locale: ctx.locale });
-  withProp(tree, 'data-dsh-widgets-search')[0].props.onChange({ target: { value: 'queue' } });
+  withProp(tree, 'data-dsh-widgets-search')[0].props.onChange({ target: { value: 'improvePrompt' } });
   hookIndex = 0;
   tree = entry.Component({ store, models: makeModels(reasoning), locale: ctx.locale });
-  assert.deepEqual(withProp(tree, 'data-dsh-widgets-row').map((node) => node.props['data-dsh-widgets-row']), ['queueReorder', 'queueEdit']);
+  assert.deepEqual(withProp(tree, 'data-dsh-widgets-row').map((node) => node.props['data-dsh-widgets-row']), ['improvePrompt']);
 
   // Empty search says so; a load error is visible; language resolves from the pinned value or the app.
   resetHooks();

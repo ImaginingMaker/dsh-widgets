@@ -41,7 +41,7 @@ const ctx = {
 };
 
 const settingsValue = {
-  on: { planToggle: true, queueReorder: true, queueEdit: true, improvePrompt: true, handoff: true, projectBrief: false },
+  on: { planToggle: true, improvePrompt: true, handoff: true, projectBrief: false },
   analysis: { model: null, effort: null },
   language: 'zh',
 };
@@ -63,15 +63,15 @@ const models = injected.models;
   const off = store.subscribe(() => seen.push(store.getSnapshot()));
   assert.equal(store.getSnapshot().ready, true);
   assert.equal(store.getSnapshot().language, 'zh');
-  assert.equal(store.getSnapshot().on.queueEdit, true);
+  assert.equal(store.getSnapshot().on.handoff, true);
   requests = [];
   handler = (url, init) => (init?.method === 'POST'
-    ? { ok: true, status: 200, json: async () => ({ ...settingsValue, on: { ...settingsValue.on, queueEdit: false } }) }
+    ? { ok: true, status: 200, json: async () => ({ ...settingsValue, on: { ...settingsValue.on, handoff: false } }) }
     : { ok: true, status: 200, json: async () => settingsValue });
-  await store.save({ id: 'queueEdit', on: false });
-  assert.equal(store.getSnapshot().on.queueEdit, false);
+  await store.save({ id: 'handoff', on: false });
+  assert.equal(store.getSnapshot().on.handoff, false);
   assert.equal(seen.length, 1, 'subscribers see the saved state');
-  assert.deepEqual(requests.at(-1).body, { id: 'queueEdit', on: false });
+  assert.deepEqual(requests.at(-1).body, { id: 'handoff', on: false });
   assert.equal(requests.at(-1).headers['content-type'], 'application/json');
   off();
 }
@@ -82,7 +82,7 @@ const models = injected.models;
   await store.load();
   assert.equal(store.getSnapshot().error, 'settings down');
   handler = () => ({ ok: false, status: 500, json: async () => { throw new Error('not json'); } });
-  await store.save({ id: 'queueEdit', on: true });
+  await store.save({ id: 'handoff', on: true });
   assert.equal(store.getSnapshot().error, 'HTTP 500');
 }
 

@@ -1,7 +1,7 @@
 /**
  * dsh-widgets — Client half.
  *
- * Six small widgets, each with its own switch in Settings → Widgets. Switching one off disposes exactly what it
+ * Four small widgets, each with its own switch in Settings → Widgets. Switching one off disposes exactly what it
  * registered.
  *
  * Two rules this file exists to keep:
@@ -19,7 +19,7 @@ import type { Language } from './kernel/i18n.js';
 import type { Translate } from './kernel/i18n.js';
 import { createModels } from './kernel/modelStore.js';
 import { read } from './kernel/safe.js';
-import { createSettings, isOn, queueOn } from './kernel/settingsStore.js';
+import { createSettings, isOn } from './kernel/settingsStore.js';
 import type { SettingsView } from './kernel/settingsStore.js';
 import { ensureStyles } from '../shared/styles.js';
 import { PLAN_PATH } from '../shared/routes.js';
@@ -28,8 +28,6 @@ import { BriefStatus } from './widgets/briefStatus.js';
 import { HandoffButton } from './widgets/handoff.js';
 import { ImproveButton } from './widgets/improve.js';
 import { PlanToggle } from './widgets/planToggle.js';
-import { QueuePanel } from './widgets/queue.js';
-import type { QueuedRow } from './widgets/queue.js';
 import { WidgetSettings } from './widgets/settings.js';
 
 /** One conversation service face: the pieces this plugin uses, all optional. */
@@ -178,20 +176,6 @@ function applyInner(ctx: ClientContext): void {
         order: 999,
         inject: (sessionId: string) => ({ togglePlan: togglePlan(sessionId), notify: notifyFor(sessionId) }),
       }, PlanToggle))],
-      off: null,
-    },
-    {
-      id: 'queue',
-      on: queueOn,
-      setup: () => [ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
-        name: 'conversation.input.dock',
-        id: 'widgets-queue',
-        order: 21,
-        inject: (sessionId: string) => ({ sessionId, notify: notifyFor(sessionId), t: t() }),
-      }, (props: { sessionId: string; useProjection(name: string): readonly QueuedRow[] | undefined; notify?: (level: 'info' | 'warn' | 'error', text: string) => void; t: Translate }) => React.createElement(QueuePanel, {
-        ...props,
-        settings: React.useSyncExternalStore(settings.subscribe, settings.getSnapshot),
-      })))],
       off: null,
     },
     {

@@ -2,7 +2,7 @@
  * The stylesheet the widgets share.
  *
  * It is injected once, when the plugin mounts, rather than by whichever component happens to render first: a button class
- * that only exists while the queue strip is drawn leaves every other control unstyled, which is exactly what a bare
+ * that only exists while one particular panel is drawn leaves every other control unstyled, which is exactly what a bare
  * browser border around a composer button looks like.
  */
 export const WIDGETS_CSS = `
@@ -125,15 +125,6 @@ export const WIDGETS_CSS = `
   overflow: auto;
   max-height: 40vh;
 }
-
-.dw-queue { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; font-size: 12px; color: var(--dsw-alias-label-secondary, inherit); }
-.dw-queue-row { display: flex; align-items: center; gap: 6px; min-height: 22px; border-radius: var(--dsw-radius-sm, 6px); padding: 1px 4px; }
-.dw-queue-over { outline: 1px dashed var(--dsw-alias-state-business-primary, #3b6cf6); }
-.dw-grip { cursor: grab; border: 0; background: none; color: inherit; font: inherit; padding: 0 2px; }
-.dw-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dw-arrows { display: inline-flex; gap: 2px; }
-.dw-edit { flex: 1; display: flex; gap: 4px; align-items: flex-start; }
-.dw-input { flex: 1; font: inherit; color: inherit; background: transparent; border: 1px solid var(--dsw-alias-border-l2, #ccc); border-radius: 4px; padding: 2px 4px; }
 
 .dw-brief { display: inline-flex; align-items: center; gap: 2px; }
 .dw-brief-dot { display: inline-block; width: 6px; height: 6px; border-radius: 3px; background: currentColor; }

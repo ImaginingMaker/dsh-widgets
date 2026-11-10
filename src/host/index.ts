@@ -3,7 +3,7 @@
  *
  * Everything that must outlive a page load or must run outside the browser: the switches and their settings, the model
  * catalogue and the reasoning efforts this Mac's own configuration declares, the one model call behind Improve prompt and
- * Project brief, moving and editing queued messages, and toggling plan mode through dsh's own command.
+ * Project brief, and toggling plan mode through dsh's own command.
  *
  * Nothing here opens a port, starts a server, or calls a model without a click — except Project brief, which is off by
  * default and says so.
@@ -17,7 +17,6 @@ import { installHandoff } from './routes/handoff.js';
 import { installImprove } from './routes/improve.js';
 import { installModels } from './routes/models.js';
 import { installPlan } from './routes/plan.js';
-import { installQueueEdit, installQueueMove } from './routes/queue.js';
 import { installSettings } from './routes/settings.js';
 import { installPreStep } from './preStep.js';
 import { projectDirOf } from './project.js';
@@ -32,7 +31,6 @@ export interface HostHandle {
 
 export function apply(ctx: HostContext): HostHandle {
   const home = process.env.DSH_HOME ?? `${homedir()}/.dsh`;
-  const queueBusy = new Set<string>();
 
   const { store } = installSettings(ctx, home);
   installModels(ctx);
@@ -40,8 +38,6 @@ export function apply(ctx: HostContext): HostHandle {
   installHandoff(ctx, home);
   installPlan(ctx);
   const brief = installBrief(ctx, home);
-  installQueueMove(ctx, queueBusy);
-  installQueueEdit(ctx, queueBusy);
 
   // The one hook that prepares a chat: the project summary gathered in advance.
   installPreStep(ctx, {
@@ -72,7 +68,6 @@ export * from '../shared/types.js';
 export * from '../shared/routes.js';
 export * from '../shared/settings.js';
 export * from '../shared/reasoning.js';
-export * from '../shared/queue.js';
 export * from '../shared/brief.js';
 export * from '../shared/handoff.js';
 export * from '../shared/styles.js';
@@ -81,6 +76,5 @@ export { installModels } from './routes/models.js';
 export { installImprove, IMPROVE_MAX_TOKENS } from './routes/improve.js';
 export { installHandoff } from './routes/handoff.js';
 export { detectHandoffLanguage, handoffLanguageOk, handoffLanguageRepairPrompt, handoffSystem, handoffTranscript, handoffSummaryPrompt, handoffContinuation, handoffTitle, HANDOFF_MAX_TOKENS } from './handoff.js';
-export { installQueueMove, installQueueEdit } from './routes/queue.js';
 export { installBrief, analysisRoute, BRIEF_MAX_TOKENS } from './routes/brief.js';
 export { installPlan, PLAN_LINES } from './routes/plan.js';

@@ -26,7 +26,6 @@ if (!existsSync(dshBin)) throw new Error(`no dsh CLI at ${dshBin}; run npm insta
 
 // ---- a fake model, so no real provider is called ------------------------------------------------------------
 const bodies = [];
-let slowTurnUsed = false;
 const SUMMARY = 'acme-web is a small demo app. Run the tests with npm test.';
 const HANDOFF_SUMMARY = '## 项目与目标\n完成登录页草稿的改写。\n\n## 当前计划与下一步\n运行测试并继续拓展计划。\n\n## 继续工作的验收条件\n测试通过。';
 const fake = createServer((req, res) => {
@@ -45,12 +44,8 @@ const fake = createServer((req, res) => {
     const wantsHandoff = /preparing a handoff note|交接说明/.test(body);
     // The Improve prompt call is held open for a moment, so the test can see what the composer does while it runs.
     const wantsRewrite = /You rewrite a developer's rough draft/.test(body);
-    // A turn marked by the test is held open, so messages typed meanwhile really enter dsh's queue. Only the first call
-    // carries the marker; later turns inherit it from the transcript and must not each wait again.
-    const wantsSlowTurn = !slowTurnUsed && /e2e-slow-turn/.test(body);
-    if (wantsSlowTurn) slowTurnUsed = true;
     // The handoff is held open too, so the test can leave the session while it is still being prepared.
-    const delay = wantsRewrite ? 1800 : wantsHandoff ? 2500 : wantsSlowTurn ? 30_000 : 0;
+    const delay = wantsRewrite ? 1800 : wantsHandoff ? 2500 : 0;
     const chunk = (delta, finish) => `data: ${JSON.stringify({
       id: 'x', object: 'chat.completion.chunk', created: 1, model: 'demo',
       choices: [{ index: 0, delta, finish_reason: finish ?? null }],
@@ -218,12 +213,12 @@ try {
 
   // 1. The settings section is ours, is Chinese, and has one row per widget.
   await openWidgets(page);
-  assert.equal(await page.locator('[data-dsh-widgets-row]').count(), 6, 'six widget rows');
+  assert.equal(await page.locator('[data-dsh-widgets-row]').count(), 4, 'four widget rows');
   assert.equal(await page.locator('[data-dsh-widgets-row="projectBrief"]').count(), 1);
   const sectionText = await page.locator('[data-dsh-widgets-settings]').innerText();
   assert.match(sectionText, /项目基本信息/, 'the panel speaks the app language');
   assert.equal(/Improve prompt|Project brief/.test(sectionText), false, 'no English left in a Chinese panel');
-  step('Settings → 小组件 shows six rows, in Chinese');
+  step('Settings → 小组件 shows four rows, in Chinese');
 
   // 2. Off by default, and switching it on reaches the Host's settings file.
   const briefSwitch = page.locator('[data-dsh-widgets-row="projectBrief"] [data-dsh-widgets-switch]');
@@ -400,63 +395,7 @@ try {
   assert.match(second, /exit_plan_mode|plan mode/i, `the next request carries dsh's plan-mode policy (${second.slice(0, 160)})`);
   step('Shift+Tab turns plan mode on through dsh\'s own command: the next request carries the policy, the draft stays empty');
 
-  // 9. The queue strip: while a turn runs, messages typed into the composer wait in dsh's inbox, and one strip carries
-  //    both switches. It reads `inbox['next-turn']` — the key dsh actually publishes — so it appears at all.
-  const stopButton = page.locator('[data-composer-seat] button[aria-label="Stop generating"]');
-  const waitForStop = () => stopButton.waitFor({ state: 'visible', timeout: 15_000 });
-  bodies.length = 0;
-  await composer.click();
-  await page.keyboard.type('e2e-slow-turn');
-  await page.keyboard.press('Enter');
-  await waitForStop();
-  // Wait for each queued message to be accepted before typing the next one: the composer leaves `plain` while sending.
-  for (const text of ['排队第一条', '排队第二条']) {
-    await composer.click();
-    await page.keyboard.type(text);
-    await page.keyboard.press('Enter');
-    await waitForStop();
-  }
-  await page.waitForFunction(
-    () => document.querySelectorAll('[data-dsh-widgets-queue-row]').length === 2,
-    null, { timeout: 15_000 },
-  );
-  const queueRows = () => page.locator('[data-dsh-widgets-queue-row] .dw-text')
-    .evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? '').trim()));
-  assert.equal(await page.locator('[data-dsh-widgets-queue-row]').count(), 2, 'both queued messages show in the strip');
-  assert.deepEqual(await queueRows(), ['排队第一条', '排队第二条']);
-
-  // The down arrow (inside the arrow group, not the edit button at the end of the row) moves through the Host route;
-  // the projection pushes the new order back to the strip.
-  await page.locator('[data-dsh-widgets-queue-row]').first().locator('.dw-arrows button').last().click();
-  await page.waitForFunction(
-    () => [...document.querySelectorAll('[data-dsh-widgets-queue-row] .dw-text')]
-      .map((node) => (node.textContent ?? '').trim()).join('|') === '排队第二条|排队第一条',
-    null, { timeout: 15_000 },
-  );
-
-  // Double-click edits in place; Enter saves through the Host and the row shows the new text.
-  await page.locator('[data-dsh-widgets-queue-row] .dw-text').first().dblclick();
-  const queueEditor = page.locator('[data-dsh-widgets-edit]').first();
-  await queueEditor.waitFor({ state: 'visible', timeout: 10_000 });
-  // Type instead of fill: a controlled textarea only sees a real input event, which is what React listens to.
-  await queueEditor.click();
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-  await page.keyboard.type('排队第二条（已改）');
-  assert.equal(await queueEditor.inputValue(), '排队第二条（已改）', 'the edit box holds the new text');
-  await page.keyboard.press('Enter');
-  await page.waitForFunction(
-    () => (document.querySelector('[data-dsh-widgets-queue-row] .dw-text')?.textContent ?? '').trim() === '排队第二条（已改）',
-    null, { timeout: 15_000 },
-  );
-  step('the queue strip reads dsh\'s inbox projection: two queued messages, reorder by arrow, edit in place');
-
-  // Let the slow turn and the messages behind it drain, so the handoff step starts from an idle session.
-  await page.waitForFunction(
-    () => document.querySelector('[data-composer-seat] button[aria-label="Stop generating"]') === null,
-    null, { timeout: 60_000 },
-  );
-
-  // 10. Handoff: one click creates a new session in the same project, sends the note, and tells it to continue the plan.
+  // 9. Handoff: one click creates a new session in the same project, sends the note, and tells it to continue the plan.
   bodies.length = 0;
   const originalRow = await page.locator('[data-row-key^="session:"][aria-selected="true"]').first().getAttribute('data-row-key');
   assert.ok(originalRow, 'the session being handed off is the selected row');
@@ -479,7 +418,7 @@ try {
   assert.equal(existsSync(join(project, 'HANDOFF.md')), false, 'the project was not written to');
   step('the Handoff icon hands the session off, and the Host finishes even after the page leaves');
 
-  // 11. Back in the session that was handed off: the state was remembered, so it can be reopened.
+  // 10. Back in the session that was handed off: the state was remembered, so it can be reopened.
   await page.locator(`[data-row-key="${originalRow}"]`).first().click();
   await page.waitForSelector('[data-dsh-widgets-handoff-state="done"]', { timeout: 20_000 });
   const donePill = page.locator('[data-dsh-widgets-handoff-open]').first();
@@ -497,7 +436,7 @@ try {
     return row?.textContent?.includes('交接 —') === true;
   }, null, { timeout: 15_000 });
 
-  // 12. Plan mode is a state, not a sentence: the new session was actually put in plan mode, so its chip is lit.
+  // 11. Plan mode is a state, not a sentence: the new session was actually put in plan mode, so its chip is lit.
   const planChip = page.getByRole('button', { name: /计划模式已开启|Plan mode on/ });
   await planChip.first().waitFor({ timeout: 15_000 });
   assert.ok(await planChip.count() > 0, 'the handed-off planning session entered plan mode itself');

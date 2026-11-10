@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  BRIEF_PROJECTS_MAX, BRIEF_PATH, HANDOFF_PATH, IMPROVE_PATH, MODELS_PATH, PLAN_PATH, QUEUE_EDIT_PATH, QUEUE_MOVE_PATH,
+  BRIEF_PROJECTS_MAX, BRIEF_PATH, HANDOFF_PATH, IMPROVE_PATH, MODELS_PATH, PLAN_PATH,
   SETTINGS_PATH, apply, briefMaterial, briefNote, briefRunner, briefStore, clipTree, hasNote, improvePromptText,
   isInsideProject, json, noteMessage, projectDirOf, projectDocuments, projectTree, runGit, service, signatureOf,
 } from '../dist/index.js';
@@ -212,7 +212,7 @@ import { makeCtx, realSubprocess, tempDir } from './helpers.mjs';
     assert.equal(typeof handle.store.read, 'function');
     assert.equal(hooks.length, 1);
     assert.equal(hooks[0][0], 'agent/pre-step');
-    for (const path of [SETTINGS_PATH, MODELS_PATH, IMPROVE_PATH, HANDOFF_PATH, PLAN_PATH, BRIEF_PATH, QUEUE_MOVE_PATH, QUEUE_EDIT_PATH]) {
+    for (const path of [SETTINGS_PATH, MODELS_PATH, IMPROVE_PATH, HANDOFF_PATH, PLAN_PATH, BRIEF_PATH]) {
       assert.ok(routes.has(path), `${path} is registered`);
     }
   } finally {
