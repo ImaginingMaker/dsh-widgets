@@ -299,7 +299,7 @@ That is what `npm run e2e` is for. It is not a mock:
 ✓ the brief panel closes from outside and from Escape, and its action looks like a button
 ✓ the wand is pressable, pulses and locks the composer, then rewrites the draft with the image
 ✓ undo/redo work, sending clears them, and the first task opens with the summary plus hierarchy
-✓ the Handoff icon creates a same-project session and sends the plan-continuation prompt
+✓ the Handoff icon creates and switches to a same-project session with the plan-continuation prompt
 ✓ Shift+Tab turns plan mode on through dsh's own command: the next request carries the policy, the draft stays empty
 ```
 
