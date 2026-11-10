@@ -11,6 +11,8 @@ export interface InputState {
   readonly draft: string;
   /** Runtime-only ids of the images and files staged in the composer; dsh keeps the browser objects itself. */
   readonly attachmentIds?: readonly string[];
+  /** Monotonic editor revision: a send or an edit changes it, even when the text happens to read the same. */
+  readonly draftRev?: number;
   /** The submit plane. `plain` is the only phase in which the composer accepts new input. */
   readonly phase?: string;
 }
@@ -44,6 +46,12 @@ export interface ComposerProps extends SlotBase {
   readonly inputActions?: InputActions;
   readonly useProjection?: (name: string) => { readonly active?: boolean; readonly pending?: boolean } | undefined;
   readonly sessionId?: string;
+}
+
+/** One `conversation.input.right` occupant that can stop the composer through dsh's own block registry. */
+export interface ComposerLock {
+  /** Raise the block; answers the release, or undefined when this dsh cannot block the composer. */
+  (reason: string): (() => void) | undefined;
 }
 
 export interface QueueProps extends SlotBase {

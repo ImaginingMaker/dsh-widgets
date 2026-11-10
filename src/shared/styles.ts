@@ -79,6 +79,8 @@ export const WIDGETS_CSS = `
    attribute is this plugin's own and is removed when the call settles. */
 .dw-btn[data-dsh-widgets-working] { opacity: 1; }
 .dw-btn[data-dsh-widgets-working] svg { animation: dw-pulse 1.1s ease-in-out infinite; }
+.dw-btn[data-dsh-widgets-handoff-working] { opacity: 1; }
+.dw-btn[data-dsh-widgets-handoff-working] svg { animation: dw-pulse 1.1s ease-in-out infinite; }
 @keyframes dw-pulse {
   0%, 100% { opacity: .35; transform: scale(.9); }
   50% { opacity: 1; transform: scale(1); }
@@ -120,6 +122,7 @@ export const WIDGETS_CSS = `
   .dw-brief-spin { animation: none; }
   .dw-btn { transition: none; }
   .dw-btn[data-dsh-widgets-working] svg { animation: none; opacity: 1; }
+  .dw-btn[data-dsh-widgets-handoff-working] svg { animation: none; opacity: 1; }
 }
 `;
 

@@ -2,13 +2,18 @@ import React from 'react';
 import { queueApi } from '../kernel/queueApi.js';
 import { isOn } from '../kernel/settingsStore.js';
 import type { SettingsView } from '../kernel/settingsStore.js';
+import { seenOf } from '../../shared/queue.js';
 import type { QueueProps } from '../slot.js';
 
 
 export interface QueuedRow {
   readonly id: string;
   readonly source?: { readonly kind?: string };
-  readonly content?: readonly { readonly type?: string; readonly text?: string }[];
+  readonly content?: readonly {
+    readonly type?: string;
+    readonly text?: string;
+    readonly attachment?: { readonly attachmentId?: string };
+  }[];
 }
 
 const rowText = (message: QueuedRow): string =>
@@ -18,11 +23,6 @@ const rowText = (message: QueuedRow): string =>
     .join(' ');
 
 const ownMessage = (message: QueuedRow): boolean => message?.source?.kind === 'user';
-
-const seenOf = (content: QueuedRow['content']): [string | null, string | undefined][] =>
-  (Array.isArray(content) ? content : []).map((block) => (block?.type === 'text'
-    ? ['text', block.text]
-    : [block?.type ?? null, undefined]));
 
 const CSS = '.dw-queue{display:flex;flex-direction:column;gap:2px;padding:4px 8px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}'
   + '.dw-queue-row{display:flex;align-items:center;gap:6px;min-height:22px;border-radius:var(--dsw-radius-sm,6px);padding:1px 4px}'
@@ -85,9 +85,23 @@ export function QueuePanel({ sessionId, useProjection, settings, notify, t }: Qu
     if (busy) return;
     const message = rows.find((item) => item.id === itemId);
     if (message === undefined) return;
+    // Keep every attachment the message already had, in its original place. The edit box only changes the text; a
+    // message with an image or file must not lose it just because the user fixed a typo.
+    const content: unknown[] = [];
+    let replaced = false;
+    for (const block of message.content ?? []) {
+      if (block?.type === 'text') {
+        if (!replaced) { content.push({ type: 'text', text: draftText }); replaced = true; }
+        continue;
+      }
+      if ((block?.type === 'image' || block?.type === 'file') && typeof block.attachment?.attachmentId === 'string') {
+        content.push({ type: block.type, attachmentId: block.attachment.attachmentId });
+      }
+    }
+    if (!replaced) content.unshift({ type: 'text', text: draftText });
     setBusy(true);
     try {
-      await api.edit(itemId, draftText, seenOf(message.content));
+      await api.edit(itemId, content, seenOf(message.content));
       setEditing(null);
     } catch {
       notify?.('error', t('queue.failed'));

@@ -9,6 +9,7 @@ export const WIDGETS = [
   'queueReorder',
   'queueEdit',
   'improvePrompt',
+  'handoff',
   'projectBrief',
 ] as const;
 

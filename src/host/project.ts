@@ -25,7 +25,10 @@ export async function projectDirOf(
     if (found !== undefined && !('error' in found)) {
       const working = service<{ get?(session: unknown): unknown }>(ctx, 'workingDirectory');
       const fromService = working?.get?.(found.agent.session);
-      if (isText(fromService, 4096)) return realpathOrUndefined(fromService);
+      if (isText(fromService, 4096)) {
+        const resolved = realpathOrUndefined(fromService);
+        if (resolved !== undefined) return resolved;
+      }
     }
   } catch { /* fall through to the chat list */ }
   const listed = ctx.sessions?.list?.getSnapshot().byId?.[body.sessionId]?.cwd;

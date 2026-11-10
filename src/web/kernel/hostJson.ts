@@ -6,8 +6,13 @@ export async function hostJson<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export const postJson = <T>(url: string, body: unknown): Promise<T> =>
-  hostJson<T>(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+export const postJson = <T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> =>
+  hostJson<T>(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    ...(signal === undefined ? {} : { signal }),
+  });
 
 /** The minimum a React component needs from a store, so a test can pass a plain object. */
 export interface Store<T> {

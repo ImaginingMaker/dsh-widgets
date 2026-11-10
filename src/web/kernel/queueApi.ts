@@ -7,7 +7,7 @@ export function queueApi(sessionId: string, before: readonly string[]) {
   return {
     move: (itemId: string, to: number): Promise<unknown> =>
       postJson(QUEUE_MOVE_PATH, { sessionId, itemId, to, before }),
-    edit: (itemId: string, text: string, seen: unknown): Promise<unknown> =>
-      postJson(QUEUE_EDIT_PATH, { sessionId, itemId, content: [{ type: 'text', text }], seen }),
+    edit: (itemId: string, content: readonly unknown[], seen: unknown): Promise<unknown> =>
+      postJson(QUEUE_EDIT_PATH, { sessionId, itemId, content, seen }),
   };
 }

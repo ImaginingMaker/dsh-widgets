@@ -1,7 +1,7 @@
 /**
  * dsh-widgets — Client half.
  *
- * Seven small widgets, each with its own switch in Settings → Widgets. Switching one off disposes exactly what it
+ * Six small widgets, each with its own switch in Settings → Widgets. Switching one off disposes exactly what it
  * registered.
  *
  * Two rules this file exists to keep:
@@ -12,7 +12,7 @@
  *    behind.
  */
 import React from 'react';
-import type { BriefView, LanguageSetting } from '../shared/types.js';
+import type { BriefView } from '../shared/types.js';
 import type { DraftImage } from './slot.js';
 import { translatorFor, resolveLanguage } from './kernel/i18n.js';
 import type { Language } from './kernel/i18n.js';
@@ -25,11 +25,22 @@ import { ensureStyles } from '../shared/styles.js';
 import { PLAN_PATH } from '../shared/routes.js';
 import { postJson } from './kernel/hostJson.js';
 import { BriefStatus } from './widgets/briefStatus.js';
+import { HandoffButton } from './widgets/handoff.js';
 import { ImproveButton } from './widgets/improve.js';
 import { PlanToggle } from './widgets/planToggle.js';
 import { QueuePanel } from './widgets/queue.js';
 import type { QueuedRow } from './widgets/queue.js';
 import { WidgetSettings } from './widgets/settings.js';
+
+/** One conversation service face: the pieces this plugin uses, all optional. */
+interface ConversationFace {
+  readonly input?: { for(ctx: unknown): { notify(level: string, text: string): void } };
+  serializeDraftAttachments?(values: readonly string[]): Promise<{ attachments: readonly unknown[] }>;
+  readonly blocks?: {
+    set(sessionId: string, block: { readonly reason: string } | undefined): void;
+    storeFor?(sessionId: string): { getSnapshot(): { readonly reason: string } | undefined };
+  };
+}
 
 /** The slice of a dsh Client Context this plugin uses. */
 interface ClientContext {
@@ -40,7 +51,8 @@ interface ClientContext {
   readonly locale?: { getSnapshot(): { active?: string } };
   readonly sessions?: {
     list: { getSnapshot(): { byId?: Record<string, { cwd?: string }> } };
-    scope(id: string): { get(name: string): { input: { for(ctx: unknown): { notify(level: string, text: string): void } }; selection?: { getSnapshot(): { current?: { provider?: string; model?: string } } } } } | undefined;
+    scope(id: string): { get?(name: string): unknown } | undefined;
+    refresh?(): Promise<void>;
   };
   readonly remote?: { commands?: { execute(sessionId: string, line: string, args: readonly unknown[]): Promise<{ ok: boolean; value?: unknown; error?: { message: string; code: string } }> } };
   get?(name: string): unknown;
@@ -57,18 +69,12 @@ interface Panel {
 export const name = 'dsh-widgets';
 
 /**
- * cordis activates a plugin only once the services it declares are present. `slots` is what this half cannot work without;
- * `locale` is declared too, because the plugin speaks the app's language. Everything else is read defensively — and plan
- * mode is toggled through this plugin's own Host route, because a client half cannot reach dsh's command registry.
+ * cordis activates a plugin only once the services it declares are present. `slots` is what this half cannot work without,
+ * `sessions` is how it reaches the composer's images and the per-session conversation service, and `locale` is declared
+ * too because the plugin speaks the app's language. Everything else is read defensively — and plan mode is toggled
+ * through this plugin's own Host route, because a client half cannot reach dsh's command registry.
  */
-export const inject = ['slots', 'locale'];
-
-const notifyFor = (ctx: ClientContext, sessionId: string) => (level: 'info' | 'warn' | 'error', text: string): void => {
-  try {
-    const scope = read(() => ctx.sessions?.scope(sessionId));
-    scope?.get('conversation').input.for(scope).notify(level, text);
-  } catch { /* a notice is best effort */ }
-};
+export const inject = ['slots', 'sessions', 'locale'];
 
 export function apply(ctx: ClientContext): void {
   try {
@@ -85,6 +91,21 @@ function applyInner(ctx: ClientContext): void {
   const models = createModels();
   const language = (): Language => resolveLanguage(settings.getSnapshot().language, read(() => ctx.locale?.getSnapshot().active));
   const t = (): Translate => translatorFor(language());
+
+  /** The session-scoped conversation service, when this dsh exposes it. */
+  const conversationOf = (sessionId: string): ConversationFace | undefined => read(() => {
+    const scope = ctx.sessions?.scope(sessionId);
+    return scope?.get?.('conversation') as ConversationFace | undefined;
+  });
+
+  const notifyFor = (sessionId: string) => (level: 'info' | 'warn' | 'error', text: string): void => {
+    try {
+      const scope = ctx.sessions?.scope(sessionId);
+      const conversation = scope?.get?.('conversation') as ConversationFace | undefined;
+      conversation?.input?.for(scope)?.notify(level, text);
+    } catch { /* a notice is best effort */ }
+  };
+
   /**
    * Toggle plan mode for one chat through the Host, which is the only half that can reach dsh's command registry.
    *
@@ -102,20 +123,49 @@ function applyInner(ctx: ClientContext): void {
 
   /**
    * The composer's staged images, serialized for the wire. dsh keeps the browser objects, so this is the one way a plugin
-   * can see what the user attached; without it an optimisation would only ever read the text.
+   * can see what the user attached; without it an optimisation would only ever read the text. A missing serializer is an
+   * error, never a quiet text-only rewrite.
    */
   const serializeAttachments = (sessionId: string) => async (ids: readonly string[]): Promise<readonly DraftImage[]> => {
     if (ids.length === 0) return [];
-    const conversation = read(() => {
-      const scope = ctx.sessions?.scope(sessionId) as { get?(name: string): unknown } | undefined;
-      return scope?.get?.('conversation') as { serializeDraftAttachments?(values: readonly string[]): Promise<{ attachments: readonly unknown[] }> } | undefined;
-    });
-    if (conversation?.serializeDraftAttachments === undefined) return [];
+    const conversation = conversationOf(sessionId);
+    if (conversation?.serializeDraftAttachments === undefined) throw new Error('this dsh cannot read composer attachments');
     const { attachments } = await conversation.serializeDraftAttachments(ids);
     return (attachments ?? []).filter((part): part is DraftImage => {
       const value = part as { type?: unknown; mediaType?: unknown; data?: unknown };
       return value.type === 'image' && typeof value.mediaType === 'string' && typeof value.data === 'string';
     });
+  };
+
+  /**
+   * Raise dsh's own composer block while one call is in flight. The block disables the editor, send button and IME at
+   * the source. An already-raised block belongs to someone else, so it is left alone; the release only clears ours.
+   */
+  const lockComposer = (sessionId: string) => (reason: string): (() => void) | undefined => {
+    const blocks = conversationOf(sessionId)?.blocks;
+    if (blocks?.set === undefined) return undefined;
+    const store = blocks.storeFor?.(sessionId);
+    const current = store?.getSnapshot?.();
+    if (current !== undefined) return () => {};
+    const block = { reason };
+    try { blocks.set(sessionId, block); } catch { return undefined; }
+    return () => {
+      try {
+        if (store !== undefined && store.getSnapshot?.() !== block) return;
+        blocks.set(sessionId, undefined);
+      } catch { /* best effort */ }
+    };
+  };
+
+  /**
+   * Open the session the Host created. The Host created it, so the client list is refreshed first; then the workspace
+   * navigation service selects it. If navigation is unavailable the caller reports the new id instead of losing it.
+   */
+  const openSession = async (target: string): Promise<void> => {
+    try { await ctx.sessions?.refresh?.(); } catch { /* refresh is best effort */ }
+    const workspace = read(() => ctx.get?.('uiWorkspace') as { openSession?(sessionId: string): void } | undefined);
+    if (workspace?.openSession === undefined) throw new Error('workspace navigation is unavailable');
+    workspace.openSession(target);
   };
 
   const panels: Panel[] = [
@@ -126,7 +176,7 @@ function applyInner(ctx: ClientContext): void {
         name: 'conversation.input.right',
         id: 'widgets-plan-toggle',
         order: 999,
-        inject: (sessionId: string) => ({ togglePlan: togglePlan(sessionId), notify: notifyFor(ctx, sessionId) }),
+        inject: (sessionId: string) => ({ togglePlan: togglePlan(sessionId), notify: notifyFor(sessionId) }),
       }, PlanToggle))],
       off: null,
     },
@@ -137,7 +187,7 @@ function applyInner(ctx: ClientContext): void {
         name: 'conversation.input.dock',
         id: 'widgets-queue',
         order: 21,
-        inject: (sessionId: string) => ({ sessionId, notify: notifyFor(ctx, sessionId), t: t() }),
+        inject: (sessionId: string) => ({ sessionId, notify: notifyFor(sessionId), t: t() }),
       }, (props: { sessionId: string; useProjection(name: string): readonly QueuedRow[] | undefined; notify?: (level: 'info' | 'warn' | 'error', text: string) => void; t: Translate }) => React.createElement(QueuePanel, {
         ...props,
         settings: React.useSyncExternalStore(settings.subscribe, settings.getSnapshot),
@@ -155,10 +205,22 @@ function applyInner(ctx: ClientContext): void {
           sessionId,
           store: settings,
           serializeAttachments: serializeAttachments(sessionId),
-          notify: notifyFor(ctx, sessionId),
+          lockComposer: lockComposer(sessionId),
+          notify: notifyFor(sessionId),
           t: t(),
         }),
       }, ImproveButton))],
+      off: null,
+    },
+    {
+      id: 'handoff',
+      on: (state) => isOn(state, 'handoff'),
+      setup: () => [ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+        name: 'conversation.input.right',
+        id: 'widgets-handoff',
+        order: 996,
+        inject: (sessionId: string) => ({ sessionId, openSession, notify: notifyFor(sessionId), t: t() }),
+      }, HandoffButton))],
       off: null,
     },
     {
@@ -168,7 +230,7 @@ function applyInner(ctx: ClientContext): void {
         name: 'conversation.input.right',
         id: 'widgets-brief',
         order: 995,
-        inject: (sessionId: string) => ({ sessionId, t: t(), notify: notifyFor(ctx, sessionId) }),
+        inject: (sessionId: string) => ({ sessionId, t: t(), notify: notifyFor(sessionId) }),
       }, BriefStatus))],
       off: null,
     },

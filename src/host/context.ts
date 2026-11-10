@@ -71,6 +71,37 @@ export interface LlmService {
   prepareCall?(config: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string; readonly maxTokens?: number }, signal?: AbortSignal): Promise<PreparedCall>;
 }
 
+/** One model-visible message part, as much of it as the handoff reader needs. */
+export interface SurfaceMessagePart {
+  readonly type?: string;
+  readonly text?: string;
+}
+
+/** One committed session event, narrowed to the fields the handoff transcript reads. */
+export interface SurfaceEventLike {
+  readonly type?: string;
+  readonly data?: {
+    readonly content?: readonly SurfaceMessagePart[];
+    readonly source?: { readonly kind?: string };
+    readonly message?: { readonly content?: readonly SurfaceMessagePart[] };
+    readonly name?: string;
+    readonly arguments?: string;
+  };
+}
+
+/** One immutable session cut from dsh's session query service. */
+export interface SessionObservationLike {
+  readonly header?: { readonly id?: string; readonly cwd?: string; readonly agentPreset?: string };
+  readonly events?: readonly SurfaceEventLike[];
+  readonly projections?: { readonly values?: Record<string, unknown> };
+}
+
+/** The session-query face this plugin uses to read durable history. */
+export interface SessionQueryService {
+  observeSession?(sessionId: string, options?: { readonly signal?: AbortSignal; readonly projectionMode?: 'all' | 'none' }): Promise<SessionObservationLike>;
+  readTitle?(sessionId: string, signal?: AbortSignal): Promise<{ readonly title?: { readonly text?: string } } | undefined>;
+}
+
 export interface InboxMessage {
   readonly id: string;
   readonly source?: { readonly kind?: string };
@@ -96,11 +127,14 @@ export interface WorkspaceEntry {
   readonly id?: string;
   readonly workspaceId?: string;
   readonly path: string;
+  readonly title?: string;
 }
 
 export interface WorkspaceRegistry {
   list(): readonly WorkspaceEntry[];
   create?(path: string, title?: string): Promise<WorkspaceEntry>;
+  resolveByPath?(path: string): Promise<WorkspaceEntry | undefined>;
+  archiveSession?(sessionId: string, options?: { readonly stopActivity?: boolean }): Promise<void>;
 }
 
 /** The `agent/pre-step` waterfall: reject a step, or replace the messages that enter it. */
@@ -129,6 +163,17 @@ export interface HostContext {
     resolveAgent(sessionId: string): Promise<{ readonly agent: Agent } | { readonly error: unknown }>;
     /** The model a session is currently set to. Reading it here is what makes "same as the chat" mean the chat. */
     readonly agents?: { selectionFor?(agent: Agent): { readonly current?: { readonly provider?: string; readonly model?: string } } | undefined };
+    /** Create a session in the same workspace (or cwd) as the one being handed off. */
+    create?(request: { readonly workspaceId?: string; readonly cwd?: string; readonly agentPreset?: string }): Promise<{ readonly sessionId: string }>;
+    /** Send one prompt into a freshly created session. */
+    prompt?(request: {
+      readonly requestId: string;
+      readonly sessionId: string;
+      readonly mode: 'queue' | 'steer';
+      readonly content: readonly { readonly type: 'text'; readonly text: string }[];
+    }, signal?: AbortSignal): Promise<unknown>;
+    /** Give the new session a stable handoff title; best effort. */
+    rename?(request: { readonly sessionId: string; readonly title: string }): Promise<unknown>;
   };
   readonly sessions?: { readonly list?: { getSnapshot(): { readonly byId?: Record<string, { readonly cwd?: string }> } } };
   readonly timer?: { interval(callback: () => void, delay: number): () => void };

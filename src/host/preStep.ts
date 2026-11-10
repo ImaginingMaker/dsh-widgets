@@ -42,7 +42,7 @@ export async function prepareChat(
     const { record, signature } = await deps.briefOf(dir);
     // Only a summary that was made from the project as it is now, and that is finished, may open the chat. A read still in
     // flight is never waited for: the task starts either way.
-    if (record !== undefined && record.status === 'ready' && record.text !== undefined && record.text !== '' && record.signature === signature) {
+    if (record !== undefined && record.status === 'ready' && record.text !== undefined && record.text.trim() !== '' && record.signature === signature) {
       // The summary and the hierarchy it was made from travel together.
       notes.push(briefNote(record.text, record.tree, deps.language()));
     }

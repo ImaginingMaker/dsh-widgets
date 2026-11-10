@@ -32,12 +32,15 @@ export const NOTE_TREE_CHARS = 4000;
 export function clipTree(tree: string, lines = NOTE_TREE_LINES, maxChars = NOTE_TREE_CHARS): string {
   const kept = tree.split('\n').filter((line) => line !== '').slice(0, lines);
   let text = kept.join('\n');
+  let truncated = false;
   if (text.length > maxChars) {
     text = text.slice(0, maxChars);
     const lastLine = text.lastIndexOf('\n');
     if (lastLine > 0) text = text.slice(0, lastLine);
+    truncated = true;
   }
-  const complete = kept.join('\n') === tree.trim() && text.length <= maxChars;
+  const originalLines = tree.split('\n').filter((line) => line !== '');
+  const complete = !truncated && kept.length === originalLines.length && text.length <= maxChars;
   return complete ? text : `${text}\n… (more entries omitted)`;
 }
 
