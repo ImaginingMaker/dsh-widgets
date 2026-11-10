@@ -1,7 +1,7 @@
 {
   "name": "dsh-widgets",
-  "version": "0.5.1",
-  "description": "Small, independently switchable widgets for the DeepSeek Harness UI: a Shift+Tab plan-mode toggle through dsh's own command, drag-and-drop and in-place editing of the message queue, an Improve prompt wand, and a quiet project brief that reads a project's file hierarchy and opens its first task with the result.",
+  "version": "0.6.0",
+  "description": "Small, independently switchable widgets for the DeepSeek Harness UI: a Shift+Tab plan-mode toggle through dsh's own command, drag-and-drop and in-place editing of the message queue, an Improve prompt wand, a one-click handoff to a new session in the same project, and a quiet project brief that reads a project's file hierarchy and opens its first task with the result.",
   "icon": "./assets/icon.svg",
   "license": "MIT",
   "type": "module",
@@ -14,7 +14,8 @@
     "plan-mode",
     "queue",
     "prompt",
-    "reasoning-effort"
+    "reasoning-effort",
+    "handoff"
   ],
   "exports": {
     ".": "./dist/index.js",
