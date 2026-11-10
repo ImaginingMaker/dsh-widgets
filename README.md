@@ -158,6 +158,11 @@ steps, risks/unverified items, acceptance checks), creates a new session **in th
 this one — and sends the handoff there as the first message. The new session is told to treat it as the previous
 session's task history, to restate the project and plan, and to continue expanding the plan before implementing anything.
 
+**Plan mode is a state, not a sentence.** When the handed-off session was in plan mode, the new session is put back into
+plan mode through dsh's own `/plan` command before the continuation prompt is sent, so its plan chip is lit and the first
+turn already carries dsh's plan-mode policy. A dsh without a command registry keeps the `<plan-mode>` marker in the note as
+the fallback.
+
 **The handoff follows the language of the conversation, not the UI.** A Chinese conversation produces a Chinese handoff,
 an English conversation an English one, even when Settings → Widgets is pinned to the other language. Code, file paths,
 commands and proper nouns stay verbatim. Other languages use the English template with an explicit "keep the user's
@@ -207,7 +212,7 @@ history read, title, route and call preparation all start before the model is ne
 accepts `###`, bold and numbered headings — a heading written differently no longer buys a whole second generation.
 
 The finished pill shows the wall time, and the record in `handoffs.json` carries the breakdown (`readMs`, `prepareMs`,
-`modelMs`, `repairMs`, `createMs`, `promptMs`, plus token counts and the effort that was sent).
+`modelMs`, `repairMs`, `createMs`, `promptMs`, plus token counts, the effort that was sent, and whether plan mode was applied).
 
 ## Settings
 
@@ -395,6 +400,10 @@ dsh plugin --profile web add dsh-widgets
 **同一个项目**（同一 workspace/cwd）里创建新会话，并把交接作为新会话的第一条消息自动发送。新会话被明确要求：
 把交接当作上个会话的任务历史、先复述项目与计划、继续拓展 plan，并在用户批准前不要开始实现。
 
+**计划模式是状态，不是一句话。** 如果被交接的会话处于计划模式，插件会在发送交接消息之前，用 dsh 自己的 `/plan` 命令把
+新会话真正切进计划模式——计划模式的 chip 会亮起，第一条消息就已经带上 dsh 的计划模式策略——而不只是让模型读一句
+`<plan-mode>`。dsh 没有命令注册表时，交接正文里的 `<plan-mode>` 标记作为兜底。
+
 **交接正文跟随会话语言，而不是界面语言。** 中文会话生成中文交接，英文会话生成英文交接；即使 Settings → Widgets
 固定为另一种语言也不会改变。代码、文件路径、命令和专有名词保留原文。其他语言使用英文模板并明确要求模型保持用户
 原语言。检测会读取最近 8 条**用户本人**的消息，忽略代码块、行内代码和 URL，并以最近一条自然语言消息为准（会话标题只作兜底）。
@@ -430,7 +439,7 @@ transcript 上限 24k 字符，其中会**为人类最近的消息预留一段�
 取标题/选路/准备调用都提前并发启动、中文修正重试现在接受 `###`、加粗和带编号的标题——标题写法不同不再换来一整份二次生成。
 
 完成后的胶囊会显示总耗时，`handoffs.json` 里的记录还带着分阶段明细（`readMs`、`prepareMs`、`modelMs`、`repairMs`、
-`createMs`、`promptMs`，以及 token 数与实际发送的 effort）。
+`createMs`、`promptMs`，以及 token 数、实际发送的 effort 与是否真正切入了计划模式）。
 
 **推理档位来自你自己的模型配置，不是写死的清单。** dsh 的模型配置里每个模型可以声明：
 

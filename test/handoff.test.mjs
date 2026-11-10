@@ -175,7 +175,7 @@ function setup({
   historyLanguage = 'en', summaries, modelFails = false, titleFails = false, workspaceThrows = false,
   archiveFails = false, noSessionController = false, noCreate = false, longHistory = false,
   holdModel = undefined, observeDelayMs = 0, modelEfforts = undefined, settingsEffort = undefined,
-  events: eventsOverride = undefined,
+  events: eventsOverride = undefined, planActive = true, commands: commandsMode = 'ok',
 } = {}) {
   const home = tempDir();
   const projectDir = join(home.dir, 'project');
@@ -240,7 +240,7 @@ function setup({
       return {
         header: { id: 's1', ...(project ? { cwd: projectDir } : {}) },
         events,
-        projections: { values: { plan: { active: true } } },
+        projections: { values: { plan: { active: planActive } } },
       };
     },
     readTitle: async () => {
@@ -262,18 +262,40 @@ function setup({
   let createdRequest;
   let promptRequest;
   let renameRequest;
+  /** The order in which create, plan and prompt happened. */
+  const order = [];
   let resolveAgentCalls = 0;
+  const resolvedIds = [];
   const sessionController = {
-    resolveAgent: async () => { resolveAgentCalls += 1; return { agent: {} }; },
-    ...(noCreate ? {} : { create: async (request) => { createdRequest = request; return { sessionId: 'new-1' }; } }),
+    resolveAgent: async (sessionId) => {
+      resolveAgentCalls += 1;
+      resolvedIds.push(sessionId);
+      return { agent: { session: { id: sessionId } } };
+    },
+    ...(noCreate ? {} : { create: async (request) => { order.push('create'); createdRequest = request; return { sessionId: 'new-1' }; } }),
     rename: async (request) => { renameRequest = request; return {}; },
     prompt: async (request) => {
       if (promptFails) throw new Error('prompt failed');
+      order.push('prompt');
       promptRequest = request;
       return { accepted: true };
     },
   };
-  const services = { ...(noModel ? {} : { llm }), sessionQuery, ...(workspace ? { workspaceRegistry } : {}) };
+  const commandCalls = [];
+  const commands = {
+    execute: async (agent, line, attachments) => {
+      commandCalls.push({ agent, line, attachments });
+      order.push('plan');
+      return commandsMode === 'error'
+        ? { result: { kind: 'error', text: 'plan mode is unavailable' } }
+        : { result: { kind: 'success', text: 'Plan mode on.' } };
+    },
+  };
+  const services = {
+    ...(noModel ? {} : { llm }), sessionQuery,
+    ...(workspace ? { workspaceRegistry } : {}),
+    ...(commandsMode === 'missing' ? {} : { commands }),
+  };
   const { ctx, routes } = makeCtx({ services, ctx: noSessionController ? {} : { sessionController } });
   if (!workspace) ctx.get = (name) => (name === 'workspaceRegistry' ? undefined : services[name]);
   const archivedCalls = [];
@@ -284,6 +306,8 @@ function setup({
     createdRequest: () => createdRequest, promptRequest: () => promptRequest, renameRequest: () => renameRequest,
     archivedCalls, promptFails,
     preparedConfigs, infoAt, observeResolvedAt: () => observeResolvedAt, resolveAgentCalls: () => resolveAgentCalls,
+    resolveAgentIds: () => resolvedIds,
+    commandCalls: () => commandCalls, order: () => order,
   };
 }
 
@@ -570,7 +594,8 @@ const tick = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
   const rt = setup({ observeDelayMs: 60 });
   const response = await call(rt.routes, HANDOFF_PATH, { method: 'POST', body: { sessionId: 's1' } });
   assert.equal(response.status, 200, JSON.stringify(response.json));
-  assert.equal(rt.resolveAgentCalls(), 1, 'the agent is resolved once, not once per consumer');
+  assert.equal(rt.resolveAgentIds().filter((id) => id === 's1').length, 1, 'the handed-off agent is resolved once, not once per consumer');
+  assert.equal(rt.resolveAgentIds().filter((id) => id === 'new-1').length, 1, 'the new session is resolved once, for plan mode');
   assert.equal(rt.infoAt.length, 1, 'the model metadata is resolved once');
   assert.ok(rt.infoAt[0] < rt.observeResolvedAt(), 'preparation starts while the history is still being read');
   rt.home.cleanup();
@@ -651,5 +676,40 @@ const tick = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
   assert.equal(prompt.includes('This snapshot supersedes'), false, 'harness narration is not in the transcript');
   assert.match(rt.renameRequest().title, /^交接 — /, 'the new session gets a Chinese title');
   assert.equal(response.json.timings.repaired, false, 'no corrective generation was needed');
+  rt.home.cleanup();
+}
+
+// ---- plan mode is a state, not a sentence: a planning session's new session really enters plan mode ---------------------
+{
+  const rt = setup();
+  const response = await call(rt.routes, HANDOFF_PATH, { method: 'POST', body: { sessionId: 's1' } });
+  assert.equal(response.status, 200, JSON.stringify(response.json));
+  const calls = rt.commandCalls();
+  assert.equal(calls.length, 1, 'dsh\'s own plan command runs once');
+  assert.equal(calls[0].line, '/plan', 'the new session is put into plan mode');
+  assert.equal(calls[0].agent.session.id, 'new-1', 'the command acts on the new session, not the old one');
+  assert.deepEqual(rt.order(), ['create', 'plan', 'prompt'], 'the mode is set before the continuation turn starts');
+  assert.equal(response.json.timings.planApplied, true);
+  rt.home.cleanup();
+}
+
+// A standard-mode session's new session stays standard, and the command is not run.
+{
+  const rt = setup({ planActive: false });
+  const response = await call(rt.routes, HANDOFF_PATH, { method: 'POST', body: { sessionId: 's1' } });
+  assert.equal(response.status, 200, JSON.stringify(response.json));
+  assert.deepEqual(rt.order(), ['create', 'prompt']);
+  assert.equal(rt.commandCalls().length, 0);
+  assert.equal(response.json.timings.planApplied, undefined);
+  rt.home.cleanup();
+}
+
+// A dsh without a command registry, or a refused command, keeps the note and still hands off.
+for (const mode of ['missing', 'error']) {
+  const rt = setup({ commands: mode });
+  const response = await call(rt.routes, HANDOFF_PATH, { method: 'POST', body: { sessionId: 's1' } });
+  assert.equal(response.status, 200, `${mode}: ${JSON.stringify(response.json)}`);
+  assert.equal(response.json.timings.planApplied, false, `${mode}: the mode was not applied`);
+  assert.equal(rt.promptRequest()?.sessionId, 'new-1', `${mode}: the handoff still reached the new session`);
   rt.home.cleanup();
 }

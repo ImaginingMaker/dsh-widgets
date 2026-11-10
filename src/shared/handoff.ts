@@ -36,6 +36,8 @@ export interface HandoffTimings {
   /** The reasoning effort actually sent, when the model declares a ladder. */
   readonly effort?: string;
   readonly repaired: boolean;
+  /** Whether the new session was actually put in plan mode; present only when the old session was planning. */
+  readonly planApplied?: boolean;
 }
 
 /**

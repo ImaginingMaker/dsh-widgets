@@ -18,6 +18,7 @@ import { handoffFileOf, handoffStore, handoffViewOf } from '../handoffStore.js';
 import { projectDirFor } from '../project.js';
 import { sharedStore, settingsFileOf } from '../store.js';
 import { analysisRoute } from './brief.js';
+import type { CommandRunner } from './plan.js';
 
 const isText = (value: unknown, max = 4096): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max;
@@ -80,6 +81,30 @@ const titleOf = async (query: SessionQueryService, sessionId: string, signal: Ab
     return undefined;
   }
 };
+
+/**
+ * Put the new session in plan mode through dsh's own `plan` command, when the handed-off session was planning.
+ *
+ * The note tells the model it was planning, but a note neither lights the plan chip nor gives the next turn dsh's
+ * plan-mode policy; the command does. It is best effort: a dsh without a command registry keeps the note and carries on.
+ */
+async function applyPlanMode(
+  ctx: HostContext,
+  controller: NonNullable<HostContext['sessionController']>,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const commands = service<CommandRunner>(ctx, 'commands');
+  if (commands?.execute === undefined) return false;
+  try {
+    const found = await controller.resolveAgent(sessionId).catch(() => undefined);
+    if (found === undefined || !('agent' in found)) return false;
+    const execution = await commands.execute(found.agent as Agent, '/plan', [], signal);
+    return execution !== undefined && execution.result.kind !== 'error';
+  } catch {
+    return false;
+  }
+}
 
 /** Which capability this dsh is missing, if any, before a handoff may start. */
 function capabilityError(ctx: HostContext): string | undefined {
@@ -229,6 +254,11 @@ export function installHandoff(ctx: HostContext, home: string): void {
       created = newSession.sessionId;
       createMs = Date.now() - createStart;
 
+      // The new session starts in standard mode; a handed-off planning session has to be put back into planning itself.
+      const planApplied = meta.planActive === true
+        ? await applyPlanMode(ctx, controller, created, signal)
+        : undefined;
+
       const title = handoffTitle(meta, language);
       const continuation = handoffContinuation(handoff, meta, language);
       const promptStart = Date.now();
@@ -260,6 +290,7 @@ export function installHandoff(ctx: HostContext, home: string): void {
         ...(usage?.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
         ...(prep.effort === undefined ? {} : { effort: prep.effort }),
         repaired,
+        ...(planApplied === undefined ? {} : { planApplied }),
       };
       const result: HandoffResult = {
         status: 'done',

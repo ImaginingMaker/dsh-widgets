@@ -435,7 +435,12 @@ try {
     const row = document.querySelector('[data-row-key^="session:"][aria-selected="true"]');
     return row?.textContent?.includes('交接 —') === true;
   }, null, { timeout: 15_000 });
-  step('a handoff survives a session switch: its state is restored and one press opens the new session');
+
+  // 11. Plan mode is a state, not a sentence: the new session was actually put in plan mode, so its chip is lit.
+  const planChip = page.getByRole('button', { name: /计划模式已开启|Plan mode on/ });
+  await planChip.first().waitFor({ timeout: 15_000 });
+  assert.ok(await planChip.count() > 0, 'the handed-off planning session entered plan mode itself');
+  step('a handoff survives a session switch: its state is restored, one press opens the new session, and plan mode really carried over');
 
   assert.deepEqual(pageErrors, [], 'no page error');
   console.log(`dsh ${dshBin}\n${results.join('\n')}`);
