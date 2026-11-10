@@ -391,19 +391,57 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   const notices = [];
   const props = {
     sessionId: 's1',
-    t: (key) => key,
+    t: (key, vars) => (vars === undefined ? key : `${key}(${Object.values(vars).join(',')})`),
     notify: (level, text) => notices.push([level, text]),
     openSession: async (id) => { opened.push(id); },
   };
+  const state = (tree) => withProp(tree, 'data-dsh-widgets-handoff-state')[0]?.props['data-dsh-widgets-handoff-state'];
+  const doneResult = {
+    status: 'done', sessionId: 'new-1', newSessionId: 'new-1', handoff: '## Goal\nShip it.', project: { cwd: '/repo' },
+    timings: { totalMs: 1234, readMs: 1, prepareMs: 2, modelMs: 1000, createMs: 3, promptMs: 4, transcriptChars: 500, outputChars: 100, reasoningChars: 0, repaired: false },
+  };
 
-  answer = () => ({ value: { sessionId: 'new-1', handoff: '## Goal\nShip it.', project: { cwd: '/repo' } } });
-  resetHooks(); requests = [];
+  // A session with no remembered handoff starts idle; one click hands it off and leaves a pill that can open the new
+  // session again.
+  answer = (url, init) => (init?.method === 'POST' ? { value: doneResult } : { value: { status: 'idle' } });
+  resetHooks(); requests = []; notices.length = 0; opened.length = 0;
   let tree = entry.Component(props);
+  await runEffects();
+  hookIndex = 0; tree = entry.Component(props);
+  assert.equal(state(tree), 'idle', 'the recovered state is idle');
   await withProp(tree, 'data-dsh-widgets-handoff')[0].props.onClick();
+  hookIndex = 0; tree = entry.Component(props);
   assert.deepEqual(lastRequest().body, { sessionId: 's1' });
   assert.equal(lastRequest().url, '/api/widgets.handoff');
   assert.deepEqual(opened, ['new-1'], 'the new session is opened');
   assert.deepEqual(notices, [['info', 'handoff.done']]);
+  assert.equal(state(tree), 'done', 'a finished handoff stays visible');
+  const pill = withProp(tree, 'data-dsh-widgets-handoff-open')[0];
+  const pillText = pill.props.children.join('');
+  assert.match(pillText, /handoff\.completed/, 'the pill says the handoff is done');
+  assert.match(pillText, /handoff\.seconds\(1\.2\)/, 'and how long it took');
+  const before = requests.length;
+  await withProp(tree, 'data-dsh-widgets-handoff-open')[0].props.onClick();
+  assert.deepEqual(opened, ['new-1', 'new-1'], 'the pill reopens the handoff session');
+  assert.equal(requests.length, before, 'opening it again does not start another handoff');
+
+  // Forgetting the handoff returns the icon, and the next click is a new handoff.
+  answer = (url, init) => (init?.method === 'POST' && init.body.includes('dismiss')
+    ? { value: { status: 'idle' } }
+    : init?.method === 'POST' ? { value: { ...doneResult, sessionId: 'new-2', newSessionId: 'new-2' } } : { value: { status: 'done', newSessionId: 'new-1' } });
+  resetHooks(); requests = []; opened.length = 0;
+  entry.Component(props);
+  await runEffects();
+  hookIndex = 0; tree = entry.Component(props);
+  assert.equal(state(tree), 'done', 'the Host remembers the finished handoff after a remount');
+  assert.deepEqual(opened, [], 'recovering a finished handoff does not hijack navigation');
+  await withProp(tree, 'data-dsh-widgets-handoff-dismiss')[0].props.onClick();
+  hookIndex = 0; tree = entry.Component(props);
+  assert.deepEqual(lastRequest().body, { sessionId: 's1', dismiss: true });
+  assert.equal(state(tree), 'idle', 'the record was forgotten');
+  await withProp(tree, 'data-dsh-widgets-handoff')[0].props.onClick();
+  assert.equal(lastRequest().method, 'POST');
+  assert.equal(opened.at(-1), 'new-2', 'a new click starts a new handoff');
 
   // A call in flight: the icon reports work and cannot be pressed twice.
   {
@@ -411,11 +449,13 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
     const realFetch = globalThis.fetch;
     globalThis.fetch = async (url, init) => {
       requests.push({ url, method: init?.method ?? 'GET', body: init?.body === undefined ? undefined : JSON.parse(init.body) });
+      if (init?.method !== 'POST') return { ok: true, status: 200, json: async () => ({ status: 'idle' }) };
       await new Promise((resolve) => { release = resolve; });
-      return { ok: true, status: 200, json: async () => ({ sessionId: 'new-2', handoff: 'h', project: {} }) };
+      return { ok: true, status: 200, json: async () => ({ ...doneResult, sessionId: 'new-2' }) };
     };
     resetHooks(); requests = []; opened.length = 0;
     tree = entry.Component(props);
+    await runEffects();
     const pending = withProp(tree, 'data-dsh-widgets-handoff')[0].props.onClick();
     await new Promise((resolve) => setTimeout(resolve, 0));
     hookIndex = 0; tree = entry.Component(props);
@@ -423,10 +463,11 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
     assert.equal(running.props['aria-busy'], true);
     assert.equal(running.props['data-dsh-widgets-handoff-working'], '');
     assert.equal(running.props.disabled, true);
+    assert.equal(state(tree), 'running');
     release();
     await pending;
     hookIndex = 0; tree = entry.Component(props);
-    assert.equal(withProp(tree, 'data-dsh-widgets-handoff')[0].props['aria-busy'], false);
+    assert.equal(state(tree), 'done');
     globalThis.fetch = realFetch;
   }
 
@@ -437,15 +478,50 @@ assert.ok(styleNodes.length >= 1, 'the shared stylesheet is installed once, not 
   await withProp(tree, 'data-dsh-widgets-handoff')[0].props.onClick();
   hookIndex = 0; tree = entry.Component(props);
   assert.deepEqual(opened, []);
-  assert.deepEqual(notices.at(-1), ['error', 'handoff.failed']);
+  assert.equal(notices.at(-1)[0], 'error');
+  assert.match(notices.at(-1)[1], /^handoff\.failed/, 'the failure is reported with its reason');
   assert.equal(withProp(tree, 'role').some((node) => node.props.role === 'alert'), true, 'the error is visible');
+  assert.equal(state(tree), 'failed');
+
+  // A handoff whose process died is reported as interrupted, not as an endless work state.
+  answer = (url, init) => (init?.method === 'GET' || init?.method === undefined
+    ? { value: { status: 'failed', error: 'the previous handoff was interrupted' } }
+    : { value: { status: 'idle' } });
+  resetHooks(); notices.length = 0;
+  tree = entry.Component(props);
+  await runEffects();
+  hookIndex = 0; tree = entry.Component(props);
+  assert.equal(state(tree), 'failed');
+  assert.equal(texts(tree).includes('handoff.interrupted'), true, 'the interruption is said in the UI language');
+
+  // A handoff still running when the session is reopened keeps reporting work, then lands on its own.
+  {
+    let phase = 'running';
+    answer = (url, init) => (init?.method === 'GET' || init?.method === undefined
+      ? { value: phase === 'running' ? { status: 'running', startedAt: Date.now() } : { status: 'done', newSessionId: 'new-9', title: 'Handoff — old', timings: doneResult.timings } }
+      : { value: { status: 'idle' } });
+    resetHooks(); notices.length = 0; opened.length = 0;
+    entry.Component(props);
+    const first = await runEffects();
+    hookIndex = 0; tree = entry.Component(props);
+    assert.equal(state(tree), 'running', 'the running handoff was recovered from the Host');
+    const polling = await runEffects();
+    phase = 'done';
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    hookIndex = 0; tree = entry.Component(props);
+    assert.equal(state(tree), 'done', 'the poll saw it finish');
+    assert.deepEqual(opened, [], 'finishing in the background does not hijack navigation');
+    assert.deepEqual(notices.at(-1), ['info', 'handoff.done'], 'it is announced once');
+    for (const drop of [...first, ...polling]) drop?.();
+  }
 
   // Navigation failing does not lose the handoff: the new id is reported.
-  answer = () => ({ value: { sessionId: 'new-3', handoff: 'h', project: {} } });
+  answer = () => ({ value: { ...doneResult, sessionId: 'new-3' } });
   resetHooks(); notices.length = 0;
   tree = entry.Component({ ...props, openSession: async () => { throw new Error('no navigation'); } });
   await withProp(tree, 'data-dsh-widgets-handoff')[0].props.onClick();
-  assert.deepEqual(notices, [['info', 'handoff.done'], ['error', 'handoff.openFailed']]);
+  assert.deepEqual(notices.map(([level, text]) => [level, text.replace(/\(.*$/, '')]),
+    [['info', 'handoff.done'], ['error', 'handoff.openFailed']]);
 
   // No session means no target, and an empty handoff is not sent.
   resetHooks(); requests = []; notices.length = 0;

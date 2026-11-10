@@ -1,9 +1,10 @@
 import type { SurfaceEventLike, SurfaceMessagePart } from './context.js';
-import { NOTE_SOURCE } from './notes.js';
 
 /** How much of the session history one handoff reads, and how large its model answer may become. */
 export const HANDOFF_TRANSCRIPT_MAX = 24_000;
 export const HANDOFF_MESSAGES_MAX = 80;
+/** Of the transcript budget, this much is reserved for the human's own messages when the tail is all assistant text. */
+export const HANDOFF_HUMAN_RESERVE = 2_000;
 export const HANDOFF_SUMMARY_MAX = 8_000;
 export const HANDOFF_MAX_TOKENS = 4_000;
 export const HANDOFF_TIMEOUT_MS = 120_000;
@@ -36,6 +37,20 @@ const CJK = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/gu;
 const KANA_OR_HANGUL = /[\u3040-\u30ff\uac00-\ud7af]/u;
 const LATIN = /[A-Za-z]/g;
 
+/**
+ * Whether one `user/message` is the human speaking.
+ *
+ * dsh also records its own narration as user messages — time samples, runtime-context snapshots, the skill catalogue,
+ * plan-mode notices, background-job settlements. Those are English far more often than the human is, so counting them as
+ * "the user's language" turned Chinese conversations into English handoffs, and putting them in the transcript spent the
+ * 24k budget on text nobody asked to hand off. The human's own turn is the one with `source.kind === 'user'` (a message
+ * recorded before dsh tagged sources has none at all).
+ */
+const isHumanVoice = (event: SurfaceEventLike): boolean => {
+  const kind = event?.data?.source?.kind;
+  return kind === undefined || kind === 'user';
+};
+
 /** Code, commands and URLs are not evidence of the human's language; remove them before counting. */
 const stripCode = (text: string): string => text
   .replace(/```[\s\S]*?```/g, ' ')
@@ -58,7 +73,7 @@ export function detectHandoffLanguage(
   const texts: string[] = [];
   for (const event of events ?? []) {
     if (event?.type !== 'user/message') continue;
-    if (event.data?.source?.kind === NOTE_SOURCE) continue;
+    if (!isHumanVoice(event)) continue;
     const text = textOf(event.data?.content);
     if (text !== '') texts.push(text);
   }
@@ -86,52 +101,97 @@ export function detectHandoffLanguage(
  * The durable conversation as a bounded handoff transcript.
  *
  * User and assistant text is the material; tool calls and results are reduced to one short line each because a handoff
- * needs the shape of what was done, not every byte a tool printed. The plugin's own project-brief note is not the user's
- * task, so it is skipped. Older entries are dropped explicitly rather than silently.
+ * needs the shape of what was done, not every byte a tool printed. Only the human's own messages count as user text — the
+ * harness's narration (time samples, runtime snapshots, skill catalogues, mode notices) is not the task. Older entries are
+ * dropped explicitly rather than silently.
  */
 export function handoffTranscript(events: readonly SurfaceEventLike[] | undefined): string {
-  const lines: string[] = [];
+  const lines: TranscriptLine[] = [];
   for (const event of events ?? []) {
     const type = event?.type;
     const data = event?.data;
     if (type === 'user/message') {
-      if (data?.source?.kind === NOTE_SOURCE) continue;
+      if (!isHumanVoice(event)) continue;
       const text = textOf(data?.content);
-      if (text !== '') lines.push(`[user]\n${text}`);
+      if (text !== '') lines.push({ label: 'user', rendered: `[user]\n${text}` });
       continue;
     }
     if (type === 'assistant/message') {
       const text = textOf(data?.message?.content);
-      if (text !== '') lines.push(`[assistant]\n${text}`);
+      if (text !== '') lines.push({ label: 'assistant', rendered: `[assistant]\n${text}` });
       continue;
     }
     if (type === 'tool/call') {
       const name = typeof data?.name === 'string' ? data.name : 'tool';
       const args = typeof data?.arguments === 'string' ? clip(data.arguments, 240) : '';
-      lines.push(`[tool] ${name}${args === '' ? '' : ` ${args}`}`);
+      lines.push({ label: 'tool', rendered: `[tool] ${name}${args === '' ? '' : ` ${args}`}` });
       continue;
     }
     if (type === 'tool/result') {
       const text = textOf(data?.message?.content);
-      if (text !== '') lines.push(`[tool result]\n${clip(text, 400)}`);
+      if (text !== '') lines.push({ label: 'tool result', rendered: `[tool result]\n${clip(text, 400)}` });
     }
   }
 
-  let kept = lines;
+  if (lines.length === 0) return '';
   let omitted = false;
+  let kept = lines;
   if (kept.length > HANDOFF_MESSAGES_MAX) {
     kept = kept.slice(-HANDOFF_MESSAGES_MAX);
     omitted = true;
   }
-  let text = kept.join('\n\n');
-  if (text.length > HANDOFF_TRANSCRIPT_MAX) {
-    text = text.slice(-HANDOFF_TRANSCRIPT_MAX);
-    const firstBreak = text.indexOf('\n');
-    if (firstBreak >= 0 && firstBreak < 200) text = text.slice(firstBreak + 1);
+
+  const rendered = kept.map(renderLine);
+  const joined = rendered.join('\n\n');
+  let tailLines = kept;
+  if (joined.length > HANDOFF_TRANSCRIPT_MAX) {
+    // A long turn of assistant and tool text can fill the whole tail. Walk back from the end so the tail fits, leaving
+    // room for the human's own messages that this tail would otherwise cut away.
+    const tailMax = HANDOFF_TRANSCRIPT_MAX - HANDOFF_HUMAN_RESERVE;
+    let at = kept.length;
+    let used = 0;
+    while (at > 0) {
+      const size = rendered[at - 1].length + (used === 0 ? 0 : 2);
+      if (used + size > tailMax) break;
+      used += size;
+      at -= 1;
+    }
+    tailLines = kept.slice(at);
     omitted = true;
   }
-  return omitted ? `(earlier messages omitted)\n\n${text}` : text;
+
+  // Reserve the human's most recent messages when the kept tail does not carry them: the task statement is generally the
+  // oldest thing in a long session, and it is the one line a handoff cannot do without.
+  const inTail = new Set(tailLines);
+  const reserved: string[] = [];
+  let reservedChars = 0;
+  for (let index = lines.length - 1; index >= 0 && reservedChars < HANDOFF_HUMAN_RESERVE; index -= 1) {
+    const line = lines[index];
+    if (line.label !== 'user' || inTail.has(line)) continue;
+    const room = HANDOFF_HUMAN_RESERVE - reservedChars;
+    const value = renderLine(line);
+    const fitted = value.length > room ? clip(value, room) : value;
+    reserved.unshift(fitted);
+    reservedChars += fitted.length + 2;
+  }
+
+  // One message longer than the whole budget is clipped rather than dropped to the reserve.
+  const tail = tailLines.length === 0
+    ? clip(renderLine(kept[kept.length - 1]), HANDOFF_TRANSCRIPT_MAX)
+    : tailLines.map(renderLine).join('\n\n');
+  if (reserved.length === 0) return omitted ? `${OMITTED}\n\n${tail}` : tail;
+  return `${OMITTED}\n\n${reserved.join('\n\n')}\n\n(messages between these and the following transcript omitted)\n\n${tail}`;
 }
+
+/** One rendered line of the handoff transcript, plus who produced it (used to reserve the human's own messages). */
+interface TranscriptLine {
+  readonly label: 'user' | 'assistant' | 'tool' | 'tool result';
+  readonly rendered: string;
+}
+
+const renderLine = (line: TranscriptLine): string => line.rendered;
+
+const OMITTED = '(earlier messages omitted)';
 
 /** Whether the session's plan projection says plan mode is active. */
 export const planActiveOf = (projections: { readonly values?: Record<string, unknown> } | undefined): boolean => {
@@ -247,7 +307,13 @@ export function handoffContinuation(summary: string, meta: HandoffMeta, language
   ].join('\n');
 }
 
-const CHINESE_HEADING = /^##\s*(?:项目与目标|当前计划与下一步|已完成的工作)/m;
+/**
+ * A Chinese section heading as models actually write it: any heading level, optional bold markers, optional numbering.
+ *
+ * This is deliberately tolerant. The strict `## 项目与目标` form once rejected `### 项目与目标`, `## **项目与目标**` and
+ * `## 1. 项目与目标`, and every rejection cost a whole second generation of the same note.
+ */
+const CHINESE_HEADING = /^ {0,3}#{2,6}[ \t]*(?:\*\*|__)?[ \t]*(?:\d+[.、)）][ \t]*)?(?:\*\*|__)?[ \t]*(?:项目与目标|当前计划与下一步|已完成的工作)/m;
 
 /** Whether a generated handoff actually uses the target language. English is not hard-failed because it also carries other languages. */
 export const handoffLanguageOk = (text: string, language: HandoffLanguage): boolean => {
@@ -279,11 +345,15 @@ export const handoffLanguageRepairPrompt = (previous: string, language: HandoffL
   ].join('\n');
 };
 
+/** An existing handoff title prefix, so handing off a handoff does not stack `交接 — 交接 — …`. */
+const EXISTING_PREFIX = /^\s*(?:handoff|交接)\s*[—–-]\s*/i;
+
 /** A stable display title for the new session, derived from the old session and project. */
 export const handoffTitle = (meta: HandoffMeta, language: HandoffLanguage = 'en'): string => {
   const prefix = language === 'zh' ? '交接' : 'Handoff';
-  const name = meta.sessionTitle?.trim();
-  if (name !== undefined && name !== '') return `${prefix} — ${clip(name, 80)}`;
+  let name = meta.sessionTitle?.trim() ?? '';
+  while (EXISTING_PREFIX.test(name)) name = name.replace(EXISTING_PREFIX, '').trim();
+  if (name !== '') return `${prefix} — ${clip(name, 80)}`;
   const project = meta.cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? 'project';
   return `${prefix} — ${project}`;
 };

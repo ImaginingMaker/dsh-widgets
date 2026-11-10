@@ -81,6 +81,27 @@ export const WIDGETS_CSS = `
 .dw-btn[data-dsh-widgets-working] svg { animation: dw-pulse 1.1s ease-in-out infinite; }
 .dw-btn[data-dsh-widgets-handoff-working] { opacity: 1; }
 .dw-btn[data-dsh-widgets-handoff-working] svg { animation: dw-pulse 1.1s ease-in-out infinite; }
+
+/* A handoff that already happened, remembered across session switches: one short pressable sentence plus a way to
+   forget it. It is a pill rather than a panel action because it lives in the composer row beside the icons. */
+.dw-handoff-done {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-primary, inherit);
+  background: transparent;
+  border: .5px solid var(--dsw-alias-border-l2, #ccc);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dw-handoff-done:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
+.dw-handoff-done:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3b6cf6); outline-offset: 1px; }
+.dw-handoff-dismiss { padding: 2px 4px; font-size: 12px; line-height: 16px; opacity: .65; }
+.dw-handoff-dismiss:hover { opacity: 1; }
 @keyframes dw-pulse {
   0%, 100% { opacity: .35; transform: scale(.9); }
   50% { opacity: 1; transform: scale(1); }

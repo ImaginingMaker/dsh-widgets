@@ -61,7 +61,13 @@ export interface PreparedCall {
     readonly messages: readonly { readonly role: 'user'; readonly content: readonly PromptBlock[] }[];
     readonly maxTokens?: number;
     readonly signal?: AbortSignal;
-  }): AsyncIterable<{ readonly type: string; readonly text?: string; readonly reason?: { readonly kind?: string; readonly failure?: { readonly message?: string } } }>;
+  }): AsyncIterable<{
+    readonly type: string;
+    readonly text?: string;
+    /** Sent once, before the terminal finish; the handoff records it to show where the time went. */
+    readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number; readonly reasoningTokens?: number; readonly totalTokens?: number };
+    readonly reason?: { readonly kind?: string; readonly failure?: { readonly message?: string } };
+  }>;
 }
 
 export interface LlmService {

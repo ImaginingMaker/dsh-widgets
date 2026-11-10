@@ -21,12 +21,12 @@ export function makeCtx(extra = {}) {
 }
 
 /** Drive one registered route with a real Request, the way dsh's connection carrier does. */
-export async function call(routes, path, { method = 'GET', body, search } = {}) {
+export async function call(routes, path, { method = 'GET', body, search, signal } = {}) {
   const route = routes.get(path);
   if (route === undefined) throw new Error(`no route registered for ${path}`);
   if (!route.methods.includes(method)) throw new Error(`${path} does not take ${method}`);
   const url = `http://test${path}${search === undefined ? '' : `?${new URLSearchParams(search)}`}`;
-  const init = { method };
+  const init = { method, ...(signal === undefined ? {} : { signal }) };
   if (body !== undefined) init.body = typeof body === 'string' ? body : JSON.stringify(body);
   const response = await route.fetch(new Request(url, init));
   const text = await response.text();

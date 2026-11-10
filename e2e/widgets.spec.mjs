@@ -44,7 +44,8 @@ const fake = createServer((req, res) => {
     const wantsHandoff = /preparing a handoff note|交接说明/.test(body);
     // The Improve prompt call is held open for a moment, so the test can see what the composer does while it runs.
     const wantsRewrite = /You rewrite a developer's rough draft/.test(body);
-    const delay = wantsRewrite ? 1800 : 0;
+    // The handoff is held open too, so the test can leave the session while it is still being prepared.
+    const delay = wantsRewrite ? 1800 : wantsHandoff ? 2500 : 0;
     const chunk = (delta, finish) => `data: ${JSON.stringify({
       id: 'x', object: 'chat.completion.chunk', created: 1, model: 'demo',
       choices: [{ index: 0, delta, finish_reason: finish ?? null }],
@@ -396,13 +397,18 @@ try {
 
   // 9. Handoff: one click creates a new session in the same project, sends the note, and tells it to continue the plan.
   bodies.length = 0;
+  const originalRow = await page.locator('[data-row-key^="session:"][aria-selected="true"]').first().getAttribute('data-row-key');
+  assert.ok(originalRow, 'the session being handed off is the selected row');
   await handoff.click();
+  // Leave the session while the handoff is still being prepared. The Host owns the job, so it must finish anyway and the
+  // composer must be able to say what became of it when the user comes back.
+  await page.getByRole('button', { name: /^(New session|新建会话)$/ }).first().click();
   const handoffStart = Date.now();
   while (Date.now() - handoffStart < 30_000 && !bodies.some((body) => body.includes('You are taking over from another session') || body.includes('你正在接手上一个会话'))) {
     await pause(250);
   }
   const continuation = bodies.find((body) => body.includes('You are taking over from another session') || body.includes('你正在接手上一个会话'));
-  assert.ok(continuation, 'the new session received the continuation prompt');
+  assert.ok(continuation, 'the new session received the continuation prompt even though the page left');
   assert.ok(continuation.includes('完成登录页草稿'), 'the generated handoff traveled to the new session');
   assert.ok(continuation.includes(project), 'the new session was told the project path');
   assert.match(continuation, /Continue expanding the plan|继续拓展计划/);
@@ -410,8 +416,26 @@ try {
   assert.ok(summaryRequest?.includes('## 当前计划与下一步'), 'the Chinese session asked for a Chinese handoff');
   assert.ok(summaryRequest?.includes('必须使用中文'), 'the handoff language followed the session, not the UI');
   assert.equal(existsSync(join(project, 'HANDOFF.md')), false, 'the project was not written to');
-  await page.waitForFunction(() => document.body.innerText.includes('交接 —'), null, { timeout: 15_000 });
-  step('the Handoff icon creates and switches to a same-project session with the plan-continuation prompt');
+  step('the Handoff icon hands the session off, and the Host finishes even after the page leaves');
+
+  // 10. Back in the session that was handed off: the state was remembered, so it can be reopened.
+  await page.locator(`[data-row-key="${originalRow}"]`).first().click();
+  await page.waitForSelector('[data-dsh-widgets-handoff-state="done"]', { timeout: 20_000 });
+  const donePill = page.locator('[data-dsh-widgets-handoff-open]').first();
+  const doneText = (await donePill.textContent()) ?? '';
+  assert.match(doneText, /交接完成|Handoff done/, `the finished handoff is visible (${doneText})`);
+  assert.match(doneText, /\d+(\.\d+)?\s*(秒|s)/, `and how long it took (${doneText})`);
+  const store = JSON.parse(readFileSync(join(home, 'storages/dsh-widgets/handoffs.json'), 'utf8'));
+  const record = Object.values(store.handoffs ?? {}).find((entry) => entry?.status === 'done');
+  assert.ok(record, 'the handoff state was written to disk');
+  assert.equal(typeof record.timings?.modelMs, 'number', 'the per-phase timings were recorded');
+  console.log(`--- handoff timings ---\n${JSON.stringify(record.timings)}`);
+  await donePill.click();
+  await page.waitForFunction(() => {
+    const row = document.querySelector('[data-row-key^="session:"][aria-selected="true"]');
+    return row?.textContent?.includes('交接 —') === true;
+  }, null, { timeout: 15_000 });
+  step('a handoff survives a session switch: its state is restored and one press opens the new session');
 
   assert.deepEqual(pageErrors, [], 'no page error');
   console.log(`dsh ${dshBin}\n${results.join('\n')}`);
