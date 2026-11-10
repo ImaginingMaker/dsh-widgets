@@ -253,7 +253,7 @@ const CHINESE_HEADING = /^##\s*(?:项目与目标|当前计划与下一步|已�
 export const handoffLanguageOk = (text: string, language: HandoffLanguage): boolean => {
   if (text.trim() === '') return false;
   if (language !== 'zh') return true;
-  return count(text, CJK) >= 20 && CHINESE_HEADING.test(text);
+  return count(text, CJK) >= 8 && CHINESE_HEADING.test(text);
 };
 
 /** One corrective instruction used when a Chinese session produced a non-Chinese handoff. */

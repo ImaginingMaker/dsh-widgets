@@ -80,6 +80,7 @@ assert.match(zhPrompt, /## 继续工作的验收条件/);
 assert.match(handoffSystem('zh'), /中文交接说明/);
 assert.match(handoffSystem('en'), /same natural language as the user's messages/);
 assert.equal(handoffLanguageOk('## 项目与目标\n修复登录页并补充测试。\n\n## 当前计划与下一步\n运行测试。', 'zh'), true);
+assert.equal(handoffLanguageOk('## 项目与目标\n修复登录。', 'zh'), true, 'a concise Chinese handoff still passes');
 assert.equal(handoffLanguageOk('## Project and goal\nFix login.\n\n## Next steps\nRun tests.', 'zh'), false, 'a Chinese session rejects an English handoff');
 assert.equal(handoffLanguageOk('', 'zh'), false);
 assert.equal(handoffLanguageOk('## Project and goal\nFix login.', 'en'), true);
