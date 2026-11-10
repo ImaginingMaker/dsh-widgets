@@ -33,10 +33,11 @@ Requires dsh ≥ 0.2.2-rc.1. MIT licensed. **No runtime dependencies** — the p
 | [Queue drag-and-drop](#queue-drag-and-drop) | Reorder queued messages by drag, or by the arrow keys. | on |
 | [Edit queued message in place](#edit-queued-message-in-place) | Change a queued message's text before it is sent. | on |
 | [Improve prompt](#improve-prompt) | One model call rewrites your draft, with a model and a reasoning effort you choose. | on |
+| [Hand off to a new session](#hand-off-to-a-new-session) | One click summarises this session and continues it in a new session in the same project. | on |
 | [Project brief](#project-brief) | A quiet summary of the project, gathered before the first task and handed to it. | **off** |
 
 Each widget's internal id — the key in `storages/dsh-widgets/settings.json`, and what to quote in an issue — is
-`planToggle`, `queueReorder`, `queueEdit`, `improvePrompt` and `projectBrief`.
+`planToggle`, `queueReorder`, `queueEdit`, `improvePrompt`, `handoff` and `projectBrief`.
 
 ---
 
@@ -77,22 +78,23 @@ is refused instead. Attachments you keep stay attached; this build does not add 
 The magic wand next to the composer rewrites your draft as a clearer prompt: the goal first, numbered steps when there
 are several parts, and the check that should pass. It reads the draft and a short, read-only description of the project
 (its file hierarchy, plus `AGENTS.md`, `README.md` and `package.json`). The rewrite **replaces the draft and is never
-sent** — read it, edit it, then press Enter. **↺** puts the original back in one step, and disappears once the message is
-sent: there is no draft left to put back.
+sent** — read it, edit it, then press Enter. **↺** puts the original back in one step; **↻** then restores the rewrite.
+Both disappear once the message is sent: there is no draft left to put back.
 
 **Images are part of the draft.** If you staged screenshots in the composer, they travel with the text — the model reads
 the whole of what you put in the box, not just the words. The plugin asks dsh to serialize exactly the attachments the
 composer holds, and dsh's own admission turns them into the references its adapters read. A model that declares it cannot
 take images is refused in words ("pick a vision model in Settings → Widgets, or remove them") instead of quietly
-optimising the text alone.
+optimising the text alone. If the composer's images cannot be read, the draft is left unchanged and the failure is shown;
+this build never falls back to a silent text-only rewrite.
 
-**While it runs, the composer is locked.** The wand pulses, and the editor is dimmed and stops taking input, so the text
-the model is rewriting cannot change under it. Everything is restored when the call settles, including on failure — and a
-call that hangs is cut off after a minute rather than leaving the box locked for the session.
+**While it runs, the composer is locked.** The wand pulses, and dsh's own composer block makes the editor and send button
+inert, so the text the model is rewriting cannot change under it. Everything is restored when the call settles, including
+on failure — and a call that hangs is cut off after a minute rather than leaving the box locked for the session.
 
 **The model is yours to choose, once.** Settings → Widgets has a single **Model** setting — **Same as the chat**, or any
-model this Mac has configured — and both Improve prompt and Project brief use it. There is one answer to "which model does
-this plugin call".
+model this Mac has configured — and Improve prompt, Project brief and Handoff use it. There is one answer to "which model
+does this plugin call".
 
 **"Same as the chat" really means the chat.** The client cannot see which model a conversation is set to, so it sends no
 route at all and the Host resolves it in this order: the model pinned here, then the chat's own model, then dsh's default.
@@ -148,6 +150,28 @@ what the agent needs most (where the code lives, which units exist) and the tree
 
 ---
 
+### Hand off to a new session
+
+The handoff icon sits between the project-brief dot and the Improve wand. One click asks the analysis model for a
+structured handoff of this session (project and goal, current state, completed work, decisions, current plan and next
+steps, risks/unverified items, acceptance checks), creates a new session **in the same project** — same workspace/cwd as
+this one — and sends the handoff there as the first message. The new session is told to treat it as the previous
+session's task history, to restate the project and plan, and to continue expanding the plan before implementing anything.
+
+**The handoff follows the language of the conversation, not the UI.** A Chinese conversation produces a Chinese handoff,
+an English conversation an English one, even when Settings → Widgets is pinned to the other language. Code, file paths,
+commands and proper nouns stay verbatim. Other languages use the English template with an explicit "keep the user's
+language" rule, so the handoff itself can stay in that language.
+
+The handoff is never written into the project. It is generated in memory and may be mirrored to a system temporary file
+while the new session is created; that file is deleted once the prompt is accepted. Only durable, committed session
+history is summarised — if a turn is still running, its uncommitted text is not included, and the new session is told to
+verify the current state first.
+
+If the project has no registered workspace, the new session is created with the same cwd instead, so it still inherits the
+project. The plugin then switches to the new session automatically; if navigation is unavailable, it reports the new
+session id rather than losing it.
+
 ## Settings
 
 **Settings → Widgets** has one row per widget with a switch. Above the rows sit two choices that apply to the whole plugin:
@@ -155,13 +179,14 @@ what the agent needs most (where the code lives, which units exist) and the tree
 - **Language** — **Same as dsh**, English or 中文. Pinning one decides what the plugin speaks regardless of the app's own
   language, which is how a Chinese panel can sit in an English app (and how the tests check it).
 - **Model** — **Same as the chat**, or any model this Mac has configured, plus its reasoning effort. There is exactly one
-  model setting: Improve prompt and Project brief both use it, so the plugin cannot call two different models by accident.
+  model setting: Improve prompt, Project brief and Handoff all use it, so the plugin cannot call different models by
+  accident.
 
 Rows also carry their own controls: the model and effort live under **Improve prompt**, next to the widget that shares them.
 
 Search filters the rows by name and description, ignoring case and accents.
 
-All five switches live in one file, `storages/dsh-widgets/settings.json` under the dsh home, written owner-only and
+All six switches live in one file, `storages/dsh-widgets/settings.json` under the dsh home, written owner-only and
 atomically (a temp file, then a rename), so a reader never sees half a file and one broken write cannot lock you out —
 a missing or unreadable file reads as the defaults.
 
@@ -169,6 +194,8 @@ a missing or unreadable file reads as the defaults.
 
 - **No network call** is made at start, and nothing is sent anywhere by this plugin.
 - **Improve prompt** calls the model only when you click the wand.
+- **Handoff** calls the model only when you click the handoff icon; the note stays in the new session's prompt and is not
+  written into the project.
 - **Project brief** calls it once per project shape, from the hierarchy it read, and caches the result.
 
 ## Limits
@@ -261,14 +288,15 @@ That is what `npm run e2e` is for. It is not a mock:
 
 ```
 ✓ dsh started and rendered with dsh-widgets loaded
-✓ Settings → 小组件 shows five rows, in Chinese
+✓ Settings → 小组件 shows six rows, in Chinese
 ✓ a switch writes storages/dsh-widgets/settings.json
 ✓ the reasoning ladder comes from the model configuration, and off is a level of it
 ✓ the Improve prompt icon has no border and no background of its own
 ✓ the project brief is read in the background and reports itself ready
 ✓ the brief panel closes from outside and from Escape, and its action looks like a button
-✓ the wand is pressable and rewrites the draft
-✓ the first task opens with the summary plus the file hierarchy, as a prompt
+✓ the wand is pressable, pulses and locks the composer, then rewrites the draft with the image
+✓ undo/redo work, sending clears them, and the first task opens with the summary plus hierarchy
+✓ the Handoff icon creates a same-project session and sends the plan-continuation prompt
 ✓ Shift+Tab turns plan mode on through dsh's own command: the next request carries the policy, the draft stays empty
 ```
 
@@ -300,7 +328,7 @@ dsh plugin --profile web add dsh-widgets
 
 然后重启 dsh。需要 dsh ≥ 0.2.2-rc.1，MIT 许可，**无运行时依赖** —— 发布包里只有构建产物。
 
-### 五个组件
+### 六个组件
 
 **Shift+Tab 计划模式** —— 在草稿最前面加上 `/plan `，再按一次移除。这正是 dsh 自己识别的格式（`/plan` 后接
 空格、制表符或行尾）；`/planning` 不会被误判。只改前缀，草稿其余内容、文件 chip 与附件保持不变，光标移到末尾。
@@ -315,7 +343,8 @@ dsh plugin --profile web add dsh-widgets
 
 **提示词优化** —— 输入框旁的魔法棒把草稿改写为更清晰的提示词：目标在前，多步骤时用编号，并给出应当通过的检查。
 它读取草稿与项目的一份只读摘要（目录层级，加上 `AGENTS.md`、`README.md`、`package.json`）。改写结果
-**只替换草稿、不会发送**，读一遍、改一改，再按 Enter；**↺** 一步还原，消息发出后它自动消失——没有草稿可还原了。
+**只替换草稿、不会发送**，读一遍、改一改，再按 Enter；**↺** 一步还原，**↻** 再恢复优化后的提示词。
+消息发出后两者都消失——没有草稿可还原了。
 
 **图片也算草稿的一部分。** 输入框里放进去的截图会跟着文字一起送进模型：它读的是你放进框里的全部内容，不只是
 文字。插件让 dsh 序列化输入框当前持有的附件，再由 dsh 自己的准入机制转成适配器读取的引用。若模型声明不支持
@@ -323,6 +352,19 @@ dsh plugin --profile web add dsh-widgets
 
 **优化期间输入框被锁定。** 魔法棒的图标闪烁，编辑器变灰并停止接受输入，避免模型正在改写的文字被改动。请求结束
 （包括失败）后一切恢复；卡住的请求会在一分钟后中止，不会让输入框一直锁着。
+
+**交接并新建会话** —— 交接图标位于项目基本信息圆点与优化魔法棒之间。点击后，用分析模型生成当前会话的结构化交接
+（项目与目标、当前状态、已完成工作、关键决策、当前计划与下一步、风险与未验证项、继续工作的验收条件），在
+**同一个项目**（同一 workspace/cwd）里创建新会话，并把交接作为新会话的第一条消息自动发送。新会话被明确要求：
+把交接当作上个会话的任务历史、先复述项目与计划、继续拓展 plan，并在用户批准前不要开始实现。
+
+**交接正文跟随会话语言，而不是界面语言。** 中文会话生成中文交接，英文会话生成英文交接；即使 Settings → Widgets
+固定为另一种语言也不会改变。代码、文件路径、命令和专有名词保留原文。其他语言使用英文模板并明确要求模型保持用户
+原语言。
+
+交接内容不会写入项目：它在内存中生成，创建新会话期间可能写入系统临时文件，消息被接受后立即删除。只汇总已提交的
+会话历史；如果当前回合仍在运行，未提交的文字不会被包含，新会话会先核对当前状态。项目没有注册 workspace 时，用
+相同 cwd 创建新会话，仍然继承项目信息。创建后自动切换到新会话；导航不可用时提示新会话 id，不会丢失。
 
 **推理档位来自你自己的模型配置，不是写死的清单。** dsh 的模型配置里每个模型可以声明：
 
@@ -345,11 +387,12 @@ reasoningEfforts:
 
 ### 设置与隐私
 
-五个开关都保存在 dsh 主目录下的 `storages/dsh-widgets/settings.json`，仅本人可读，原子写入（先写临时文件再
+六个开关都保存在 dsh 主目录下的 `storages/dsh-widgets/settings.json`，仅本人可读，原子写入（先写临时文件再
 重命名），因此读方不会读到半个文件，一次坏写入也不会把人锁在设置之外——文件缺失或损坏都按默认值读取。
 
-本插件**不发起任何网络请求**；「提示词优化」只在你点击魔法棒时调用模型；「项目基本信息」只在你打开该组件时
-调用一次模型，并按键入了目录树的指纹缓存。
+本插件**不发起任何网络请求**；「提示词优化」只在你点击魔法棒时调用模型；「交接并新建会话」只在你点击交接图标时
+调用模型，交接内容只进入新会话的提示词，不写入项目；「项目基本信息」只在你打开该组件时调用一次模型，并按键入了
+目录树的指纹缓存。
 
 ### 已知限制
 
